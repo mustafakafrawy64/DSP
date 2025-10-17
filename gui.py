@@ -7,6 +7,8 @@ import numpy as np
 from signal_model import Signal
 from signal_generator import GenerateSignal
 from utils import unique_name
+from quantization import quantize_signal
+from signal_model import Signal
 
 
 class SignalApp:
@@ -79,6 +81,10 @@ class SignalApp:
         ops_menu.add_command(label="Accumulate", command=self.accumulate_selected)
         menubar.add_cascade(label="Operations", menu=ops_menu)
 
+        #---Quantization menu---
+        ops_menu.add_separator()
+        ops_menu.add_command(label="Quantize Signal", command=self.quantize_selected_signal)
+
     # =======================
     # SIGNAL MANAGEMENT
     # =======================
@@ -125,6 +131,7 @@ class SignalApp:
         indices = self.listbox.curselection()
         return [self.signals[i] for i in indices]
 
+    
     # =======================
     # PLOTTING
     # =======================
@@ -268,3 +275,53 @@ class SignalApp:
         result.name = unique_name(result.name, [s.name for s in self.signals])
         self.signals.append(result)
         self._refresh_listbox()
+
+    
+        
+    # =======================
+    # QUANTIZATION
+    # =======================
+    def quantize_selected_signal(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select one signal to quantize.")
+            return
+
+        sig = sels[0]
+
+        mode = simpledialog.askstring("Quantization Mode", "Enter 'bits' or 'levels':")
+        if mode not in ("bits", "levels"):
+            messagebox.showerror("Invalid Input", "You must type 'bits' or 'levels'.")
+            return
+
+        try:
+            if mode == "bits":
+                bits = int(simpledialog.askstring("Bits", "Enter number of bits:"))
+                output_filename = filedialog.asksaveasfilename(
+                    title="Save Quantization Output",
+                    defaultextension=".txt",
+                    filetypes=[("Text files", "*.txt")],
+                    initialfile="quantized_output.txt"
+                )
+                if not output_filename:
+                    return
+                from quantization import quantize_to_file
+                _, codes, q_vals, _ = quantize_to_file(sig.samples, output_filename, mode, num_bits=bits)
+                messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
+
+            else:  # levels mode
+                levels = int(simpledialog.askstring("Levels", "Enter number of levels:"))
+                output_filename = filedialog.asksaveasfilename(
+                    title="Save Quantization Output",
+                    defaultextension=".txt",
+                    filetypes=[("Text files", "*.txt")],
+                    initialfile="quantized_output.txt"
+                )
+                if not output_filename:
+                    return
+                from quantization import quantize_to_file
+                interval, codes, q_vals, errs = quantize_to_file(sig.samples, output_filename, mode, num_levels=levels)
+                messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
