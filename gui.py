@@ -295,8 +295,18 @@ class SignalApp:
             return
 
         try:
+            from quantization import quantize_to_file
+
             if mode == "bits":
                 bits = int(simpledialog.askstring("Bits", "Enter number of bits:"))
+                test_file_1 = filedialog.askopenfilename(
+                    title="Select Quan1_Out.txt (expected test file)",
+                    filetypes=[("Text files", "*.txt")]
+                )
+                if not test_file_1:
+                    messagebox.showinfo("Skipped", "No test file selected — skipping test.")
+                    test_file_1 = None
+
                 output_filename = filedialog.asksaveasfilename(
                     title="Save Quantization Output",
                     defaultextension=".txt",
@@ -305,12 +315,27 @@ class SignalApp:
                 )
                 if not output_filename:
                     return
-                from quantization import quantize_to_file
-                _, codes, q_vals, _ = quantize_to_file(sig.samples, output_filename, mode, num_bits=bits)
+
+                
+                _, codes, q_vals, _ = quantize_to_file(
+                    sig.samples,
+                    output_filename,
+                    mode,
+                    num_bits=bits,
+                    test_file_1=test_file_1
+                )
                 messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
 
-            else:  # levels mode
+            else:  
                 levels = int(simpledialog.askstring("Levels", "Enter number of levels:"))
+                test_file_2 = filedialog.askopenfilename(
+                    title="Select Quan2_Out.txt (expected test file)",
+                    filetypes=[("Text files", "*.txt")]
+                )
+                if not test_file_2:
+                    messagebox.showinfo("Skipped", "No test file selected — skipping test.")
+                    test_file_2 = None
+
                 output_filename = filedialog.asksaveasfilename(
                     title="Save Quantization Output",
                     defaultextension=".txt",
@@ -319,8 +344,15 @@ class SignalApp:
                 )
                 if not output_filename:
                     return
-                from quantization import quantize_to_file
-                interval, codes, q_vals, errs = quantize_to_file(sig.samples, output_filename, mode, num_levels=levels)
+
+                
+                interval, codes, q_vals, errs = quantize_to_file(
+                    sig.samples,
+                    output_filename,
+                    mode,
+                    num_levels=levels,
+                    test_file_2=test_file_2
+                )
                 messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
 
         except Exception as e:
