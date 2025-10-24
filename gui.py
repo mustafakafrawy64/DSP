@@ -10,10 +10,10 @@ from utils import unique_name
 from quantization import quantize_signal
 from signal_model import Signal
 
-# --- NEW IMPORT ---
-# Import the new Fourier Transform functions
+# --- NEW/UPDATED IMPORTS ---
 try:
-    from Fourier_transform import dft, idft, get_dominant_frequencies
+    # Import all required functions from the FT module
+    from Fourier_transform import dft, idft, get_dominant_frequencies, test_reconstructed_signal
 except ImportError:
     messagebox.showerror("Error", "Fourier_transform.py not found. Frequency domain features will be disabled.")
 
@@ -31,7 +31,11 @@ except ImportError:
         return []
 
 
-# --- END NEW IMPORT ---
+    def test_reconstructed_signal(sig, file):
+        print("Error: test_reconstructed_signal not found.")
+
+
+# --- END NEW/UPDATED IMPORTS ---
 
 
 class SignalApp:
@@ -127,6 +131,12 @@ class SignalApp:
         ft_menu.add_command(label="Modify Components...", command=self.modify_components_dialog)
         ft_menu.add_separator()
         ft_menu.add_command(label="Reconstruct Signal (IDFT)", command=self.apply_idft)
+
+        # --- NEW TEST MENU ITEM ---
+        ft_menu.add_separator()
+        ft_menu.add_command(label="Test Signal vs. File...", command=self.test_reconstruction_dialog)
+        # --- END NEW TEST MENU ITEM ---
+
         menubar.add_cascade(label="Frequency Domain", menu=ft_menu)
         # --- END NEW MENU ---
 
@@ -665,3 +675,31 @@ class SignalApp:
 
         messagebox.showinfo("Signal Reconstructed",
                             f"Signal '{sig_name}' created from IDFT.\nSelect it from the list and press 'Plot Selected' to view.")
+
+    def test_reconstruction_dialog(self):
+        """
+        Tests a selected signal against an expected signal file using
+        the CompareSignals.SignalsAreEqual function.
+        """
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to test.")
+            return
+
+        sig_to_test = sels[0]
+
+        test_file_path = filedialog.askopenfilename(
+            title="Select Expected Signal File for Comparison",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not test_file_path:
+            return  # User cancelled
+
+        # Call the test function from the FT module
+        # This function prints results to the console
+        test_reconstructed_signal(sig_to_test, test_file_path)
+
+        messagebox.showinfo("Test Complete",
+                            "Signal comparison test finished.\n\n"
+                            "Please check your console (terminal) for 'passed' or 'failed' messages.")
