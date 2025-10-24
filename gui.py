@@ -13,7 +13,10 @@ from signal_model import Signal
 # --- NEW/UPDATED IMPORTS ---
 try:
     # Import all required functions from the FT module
-    from Fourier_transform import dft, idft, get_dominant_frequencies, test_reconstructed_signal
+    from Fourier_transform import (
+        dft, idft, get_dominant_frequencies,
+        test_reconstructed_signal, run_comparison_test
+    )
 except ImportError:
     messagebox.showerror("Error", "Fourier_transform.py not found. Frequency domain features will be disabled.")
 
@@ -35,6 +38,10 @@ except ImportError:
         print("Error: test_reconstructed_signal not found.")
 
 
+    def run_comparison_test(file, amps, phases):
+        print("Error: run_comparison_test not found.")
+
+
 # --- END NEW/UPDATED IMPORTS ---
 
 
@@ -47,7 +54,7 @@ class SignalApp:
         self.signals = []
         self.result_signal = None
 
-        # --- NEW FT DATA STORAGE ---
+        # --- FT DATA STORAGE ---
         self.freq_components = None
         self.frequencies = None
         self.amplitudes_norm = None
@@ -55,7 +62,7 @@ class SignalApp:
         self.phases = None
         self.current_fs = None
         self.selected_signal_for_ft = None
-        # --- END NEW FT DATA STORAGE ---
+        # --- END FT DATA STORAGE ---
 
         # === Left panel ===
         left_frame = tk.Frame(self.root, width=220)
@@ -122,7 +129,7 @@ class SignalApp:
         ops_menu.add_separator()
         ops_menu.add_command(label="Quantize Signal", command=self.quantize_selected_signal)
 
-        # --- NEW FREQUENCY DOMAIN MENU ---
+        # --- FREQUENCY DOMAIN MENU (MODIFIED) ---
         ft_menu = tk.Menu(menubar, tearoff=0)
         ft_menu.add_command(label="Apply Fourier Transform (DFT)", command=self.apply_dft)
         ft_menu.add_command(label="Show Dominant Frequencies", command=self.show_dominant_frequencies)
@@ -131,11 +138,12 @@ class SignalApp:
         ft_menu.add_command(label="Modify Components...", command=self.modify_components_dialog)
         ft_menu.add_separator()
         ft_menu.add_command(label="Reconstruct Signal (IDFT)", command=self.apply_idft)
-
-        # --- NEW TEST MENU ITEM ---
         ft_menu.add_separator()
-        ft_menu.add_command(label="Test Signal vs. File...", command=self.test_reconstruction_dialog)
-        # --- END NEW TEST MENU ITEM ---
+
+        # --- MODIFIED/NEW TEST MENU ITEMS ---
+        ft_menu.add_command(label="Test Signal vs. File... (Time-Domain)", command=self.test_reconstruction_dialog)
+        ft_menu.add_command(label="Test DFT Output vs. File... (Freq-Domain)", command=self.test_dft_output_dialog)
+        # --- END NEW TEST MENU ITEMS ---
 
         menubar.add_cascade(label="Frequency Domain", menu=ft_menu)
         # --- END NEW MENU ---
@@ -649,13 +657,11 @@ class SignalApp:
             return
 
         # Reconstruct the complex array from the (potentially modified) amps/phases
-        # This is the crucial step
         modified_complex = self.amplitudes_unnorm * np.exp(1j * self.phases)
 
         # Call IDFT
         reconstructed_y = idft(modified_complex)
 
-        # Get the original x_values (time/index)
         original_samples = self.selected_signal_for_ft.samples
         if len(original_samples) != len(reconstructed_y):
             messagebox.showerror("Error", "Mismatch in length during reconstruction. This should not happen.")
@@ -663,7 +669,6 @@ class SignalApp:
 
         x_values = [s[0] for s in original_samples]
 
-        # Create a new Signal object
         sig_name = unique_name(
             f"{self.selected_signal_for_ft.name}_IDFT",
             [s.name for s in self.signals]
@@ -676,20 +681,47 @@ class SignalApp:
         messagebox.showinfo("Signal Reconstructed",
                             f"Signal '{sig_name}' created from IDFT.\nSelect it from the list and press 'Plot Selected' to view.")
 
+    # --- TEST FUNCTIONS ---
+
     def test_reconstruction_dialog(self):
         """
-        Tests a selected signal against an expected signal file using
-        the CompareSignals.SignalsAreEqual function.
+        Tests a selected TIME-DOMAIN signal against an expected TIME-DOMAIN signal file.
+        Uses CompareSignals.SignalsAreEqual
         """
         sels = self._get_selected_signals()
         if len(sels) != 1:
-            messagebox.showwarning("Warning", "Select exactly one signal to test.")
+            messagebox.showwarning("Warning", "Select exactly one TIME-DOMAIN signal to test.")
             return
 
         sig_to_test = sels[0]
 
         test_file_path = filedialog.askopenfilename(
-            title="Select Expected Signal File for Comparison",
+            title="Select Expected TIME-DOMAIN Signal File (index sample)",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+
+        if not test_file_path:
+            return  # User cancelled
+
+        # Call the test function from the FT module
+        test_reconstructed_signal(sig_to_test, test_file_path)
+
+        messagebox.showinfo("Test Complete",
+                            "Time-Domain test finished.\n\n"
+                            "Please check your console (terminal) for 'passed' or 'failed' messages.")
+
+    def test_dft_output_dialog(self):
+        """
+        Tests the current DFT output (Amplitudes/Phases) against an expected
+        FREQUENCY-DOMAIN file. Uses signalcompare.SignalComapre...
+        """
+        if self.amplitudes_unnorm is None or self.phases is None:
+            messagebox.showwarning("No FT Data",
+                                   "Please run 'Apply Fourier Transform' first to generate data to test.")
+            return
+
+        test_file_path = filedialog.askopenfilename(
+            title="Select Expected FREQUENCY-DOMAIN File (amplitude phase)",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
         )
 
@@ -698,8 +730,12 @@ class SignalApp:
 
         # Call the test function from the FT module
         # This function prints results to the console
-        test_reconstructed_signal(sig_to_test, test_file_path)
+        run_comparison_test(
+            output_file_to_read=test_file_path,
+            input_amplitudes=self.amplitudes_unnorm,
+            input_phases=self.phases
+        )
 
         messagebox.showinfo("Test Complete",
-                            "Signal comparison test finished.\n\n"
+                            "Frequency-Domain test finished.\n\n"
                             "Please check your console (terminal) for 'passed' or 'failed' messages.")
