@@ -1,102 +1,6 @@
 import numpy as np
 
 # ==========================================================
-#                Quantization Test Functions (as given)
-# ==========================================================
-def QuantizationTest1(file_name,Your_EncodedValues,Your_QuantizedValues):
-    expectedEncodedValues=[]
-    expectedQuantizedValues=[]
-    with open(file_name, 'r') as f:
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        while line:
-            # process line
-            L=line.strip()
-            if len(L.split(' '))==2:
-                L=line.split(' ')
-                V2=str(L[0])
-                V3=float(L[1])
-                expectedEncodedValues.append(V2)
-                expectedQuantizedValues.append(V3)
-                line = f.readline()
-            else:
-                break
-    if( (len(Your_EncodedValues)!=len(expectedEncodedValues)) or (len(Your_QuantizedValues)!=len(expectedQuantizedValues))):
-        print("QuantizationTest1 Test case failed, your signal have different length from the expected one")
-        return
-    for i in range(len(Your_EncodedValues)):
-        if(Your_EncodedValues[i]!=expectedEncodedValues[i]):
-            print("QuantizationTest1 Test case failed, your EncodedValues have different EncodedValues from the expected one") 
-            return
-    for i in range(len(expectedQuantizedValues)):
-        if abs(Your_QuantizedValues[i] - expectedQuantizedValues[i]) < 0.01:
-            continue
-        else:
-            print("QuantizationTest1 Test case failed, your QuantizedValues have different values from the expected one") 
-            return
-    print("QuantizationTest1 Test case passed successfully")
-
-
-
-def QuantizationTest2(file_name,Your_IntervalIndices,Your_EncodedValues,Your_QuantizedValues,Your_SampledError):
-    expectedIntervalIndices=[]
-    expectedEncodedValues=[]
-    expectedQuantizedValues=[]
-    expectedSampledError=[]
-    with open(file_name, 'r') as f:
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        while line:
-            # process line
-            L=line.strip()
-            if len(L.split(' '))==4:
-                L=line.split(' ')
-                V1=int(L[0])
-                V2=str(L[1])
-                V3=float(L[2])
-                V4=float(L[3])
-                expectedIntervalIndices.append(V1)
-                expectedEncodedValues.append(V2)
-                expectedQuantizedValues.append(V3)
-                expectedSampledError.append(V4)
-                line = f.readline()
-            else:
-                break
-    if(len(Your_IntervalIndices)!=len(expectedIntervalIndices)
-     or len(Your_EncodedValues)!=len(expectedEncodedValues)
-      or len(Your_QuantizedValues)!=len(expectedQuantizedValues)
-      or len(Your_SampledError)!=len(expectedSampledError)):
-        print("QuantizationTest2 Test case failed, your signal have different length from the expected one")
-        return
-    for i in range(len(Your_IntervalIndices)):
-        if(Your_IntervalIndices[i]!=expectedIntervalIndices[i]):
-            print("QuantizationTest2 Test case failed, your signal have different indicies from the expected one") 
-            return
-    for i in range(len(Your_EncodedValues)):
-        if(Your_EncodedValues[i]!=expectedEncodedValues[i]):
-            print("QuantizationTest2 Test case failed, your EncodedValues have different EncodedValues from the expected one") 
-            return
-        
-    for i in range(len(expectedQuantizedValues)):
-        if abs(Your_QuantizedValues[i] - expectedQuantizedValues[i]) < 0.01:
-            continue
-        else:
-            print("QuantizationTest2 Test case failed, your QuantizedValues have different values from the expected one") 
-            return
-    for i in range(len(expectedSampledError)):
-        if abs(Your_SampledError[i] - expectedSampledError[i]) < 0.01:
-            continue
-        else:
-            print("QuantizationTest2 Test case failed, your SampledError have different values from the expected one") 
-            return
-    print("QuantizationTest2 Test case passed successfully")
-
-
-# ==========================================================
 #                Quantization Core Function
 # ==========================================================
 def quantize_signal(samples, num_levels=None, num_bits=None):
@@ -132,23 +36,18 @@ def quantize_signal(samples, num_levels=None, num_bits=None):
 
 
 # ==========================================================
-#                Quantize and Write to File + Run Tests
+#                Quantize and Write to File
 # ==========================================================
-def quantize_to_file(samples, output_filename, mode,
-                     num_bits=None, num_levels=None,
-                     test_file_1=None, test_file_2=None):
-    """
-    Quantizes samples, writes output file, and automatically
-    runs QuantizationTest1 or QuantizationTest2 (showing results in terminal).
-    """
+def quantize_to_file(samples, output_filename, mode, num_bits=None, num_levels=None):
+    """Quantizes given samples and writes results to a file with the correct format."""
 
     interval_indices, encoded_values, quantized_values, errors = quantize_signal(
         samples, num_bits=num_bits, num_levels=num_levels
     )
 
     with open(output_filename, 'w') as f:
-        f.write("0\n")
-        f.write("0\n")
+        f.write("0\n")           # signal type placeholder
+        f.write("0\n")           # periodic placeholder
         f.write(f"{len(samples)}\n")
 
         if mode == "bits":
@@ -157,18 +56,5 @@ def quantize_to_file(samples, output_filename, mode,
         elif mode == "levels":
             for idx, code, q, err in zip(interval_indices, encoded_values, quantized_values, errors):
                 f.write(f"{idx} {code} {q} {err}\n")
-
-    print(f"\nQuantized data saved to: {output_filename}")
-
-    # ============================
-    # Automatically run test cases
-    # ============================
-    if mode == "bits" and test_file_1:
-        print("\nRunning QuantizationTest1...")
-        QuantizationTest1(test_file_1, encoded_values, quantized_values)
-
-    elif mode == "levels" and test_file_2:
-        print("\nRunning QuantizationTest2...")
-        QuantizationTest2(test_file_2, interval_indices, encoded_values, quantized_values, errors)
 
     return interval_indices, encoded_values, quantized_values, errors
