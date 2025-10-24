@@ -10,7 +10,7 @@ from utils import unique_name
 from quantization import quantize_signal
 from signal_model import Signal
 
-# --- NEW/UPDATED IMPORTS ---
+
 try:
     # Import all required functions from the FT module
     from Fourier_transform import (
@@ -42,7 +42,7 @@ except ImportError:
         print("Error: run_comparison_test not found.")
 
 
-# --- END NEW/UPDATED IMPORTS ---
+
 
 
 class SignalApp:
@@ -419,9 +419,7 @@ class SignalApp:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # =================================================
-    # --- NEW FREQUENCY DOMAIN (TASK 3) FUNCTIONS ---
-    # =================================================
+
 
     def _plot_frequency_domain(self):
         """Helper function to plot the current frequency domain data."""
@@ -640,7 +638,6 @@ class SignalApp:
         tk.Button(edit_frame, text="Done (Save Changes)", command=on_done).pack(side=tk.BOTTOM, pady=20)
         tk.Button(edit_frame, text="Cancel", command=on_cancel).pack(side=tk.BOTTOM)
 
-        # --- Initial Population ---
         populate_listbox()
 
     def apply_idft(self):
@@ -729,7 +726,6 @@ class SignalApp:
             return  # User cancelled
 
         # Call the test function from the FT module
-        # This function prints results to the console
         run_comparison_test(
             output_file_to_read=test_file_path,
             input_amplitudes=self.amplitudes_unnorm,
