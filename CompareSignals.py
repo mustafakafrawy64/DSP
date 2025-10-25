@@ -19,16 +19,18 @@ def SignalsAreEqual(TaskName,given_output_filePath,Your_indices,Your_samples):
             else:
                 break
     if (len(expected_samples)!=len(Your_samples)) and (len(expected_indices)!=len(Your_indices)):
-        print(TaskName+" Test case failed, your signal have different length from the expected one")
-        return
+         print(TaskName+" Test case failed, your signal have different length from the expected one")
+         return
     for i in range(len(Your_indices)):
         if(Your_indices[i]!=expected_indices[i]):
             print(TaskName+" Test case failed, your signal have different indicies from the expected one") 
             return             
     for i in range(len(expected_samples)):
-        if abs(Your_samples[i] - expected_samples[i]) < 0.01:
-            continue
-        else:
-            print(TaskName+" Test case failed, your signal have different values from the expected one") 
+        A = round(Your_samples[i], 9)
+        B = round(expected_samples[i], 9)
+        
+        if A != B:
+            print(TaskName+" Test case failed, your signal have different values from the expected one")
+            print(f"Sample Mismatch at index {i}: Got {A}, expected {B}")
             return
     print(TaskName+" Test case passed successfully")
