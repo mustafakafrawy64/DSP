@@ -7,8 +7,8 @@ def SignalComapreAmplitude(SignalInput = [] ,SignalOutput= []):
     else:
         for i in range(len(SignalInput)):
             # --- MODIFIED LOGIC ---
-            A = round(SignalInput[i], 9)
-            B = round(SignalOutput[i], 9)
+            A = round(SignalInput[i], 13)
+            B = round(SignalOutput[i], 13)
             
             if A != B:
                 print(f"Amplitude Mismatch at index {i}: Got {A}, expected {B}")
