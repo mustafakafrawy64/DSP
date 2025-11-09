@@ -8,6 +8,7 @@ from signal_model import Signal
 from signal_generator import GenerateSignal
 from utils import unique_name
 from quantization import quantize_signal
+from fft_ifft_handler import fft_ifft_handler
 from signal_model import Signal
 
 
@@ -123,6 +124,9 @@ class SignalApp:
         ops_menu.add_command(label="Square", command=self.square_selected)
         ops_menu.add_command(label="Normalize", command=self.normalize_selected)
         ops_menu.add_command(label="Accumulate", command=self.accumulate_selected)
+        ops_menu.add_separator()
+        ops_menu.add_command(label="FFT / IFFT", command=lambda: fft_ifft_handler(self._get_selected_signals()))
+
         menubar.add_cascade(label="Operations", menu=ops_menu)
 
         # ---Quantization menu---
