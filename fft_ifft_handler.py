@@ -2,7 +2,7 @@ import numpy as np
 from tkinter import simpledialog, filedialog, messagebox
 from signal_model import Signal
 import matplotlib.pyplot as plt
-from Fourier_transform import dft, idft  # dft now uses your manual recursive DIT FFT
+from Fourier_transform import dft, idft, run_comparison_test, test_reconstructed_signal
 
 
 def fft_ifft_handler(signals):
@@ -10,15 +10,12 @@ def fft_ifft_handler(signals):
     Handles both:
       1️⃣ FFT (Decimation-in-Time) → show Frequency vs Amplitude/Phase.
       2️⃣ IFFT reconstruction from a polar frequency file.
-      3️⃣ Test mode → internal verification of both FFT and IFFT logic.
     """
 
-    # Ask user for operation type
     choice = simpledialog.askstring(
         "FFT / IFFT / Test",
         "Enter 'fft' to compute FFT of a signal\n"
         "Enter 'ifft' to reconstruct from a frequency file\n"
-        "Enter 'test' to run a built-in self-test:"
     )
     if not choice:
         return
@@ -40,23 +37,25 @@ def fft_ifft_handler(signals):
         y = np.array([s[1] for s in sig.samples])
         freqs, amp_norm, phase, amp_raw, fft_complex = dft(y, Fs)
 
-        plt.figure(figsize=(10, 6))
-        plt.subplot(2, 1, 1)
-        plt.plot(freqs, amp_raw)
-        plt.title("Frequency vs Amplitude (Manual DIT FFT)")
-        plt.xlabel("Frequency (Hz)")
-        plt.ylabel("Amplitude")
-        plt.grid(True)
+               # --- Close any previous plots before showing new FFT ---
+        plt.close('all')
 
-        plt.subplot(2, 1, 2)
-        plt.plot(freqs, phase)
-        plt.title("Frequency vs Phase (Manual DIT FFT)")
-        plt.xlabel("Frequency (Hz)")
-        plt.ylabel("Phase (radians)")
-        plt.grid(True)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6))
+        ax1.plot(freqs, amp_raw)
+        ax1.set_title("Frequency vs Amplitude (Manual FFT)")
+        ax1.set_xlabel("Frequency (Hz)")
+        ax1.set_ylabel("Amplitude")
+        ax1.grid(True)
 
-        plt.tight_layout()
+        ax2.plot(freqs, phase)
+        ax2.set_title("Frequency vs Phase (Manual FFT)")
+        ax2.set_xlabel("Frequency (Hz)")
+        ax2.set_ylabel("Phase (radians)")
+        ax2.grid(True)
+
+        fig.tight_layout()
         plt.show()
+
 
     # ===============================================================
     # 2️⃣ IFFT MODE (Reconstruction)
@@ -95,72 +94,21 @@ def fft_ifft_handler(signals):
             if save_path:
                 reconstructed_signal.save_to_file(save_path)
 
-            plt.figure()
+                  
+            plt.close('all')
+
+            plt.figure(figsize=(8, 5))
             plt.plot(x_vals, reconstructed_y, label="Reconstructed Signal")
-            plt.title("Time-Domain Reconstructed Signal (IFFT)")
+            plt.title("Time-Domain Reconstructed Signal (Manual IFFT)")
             plt.xlabel("Sample Index")
             plt.ylabel("Amplitude")
             plt.grid(True)
             plt.legend()
+            plt.tight_layout()
             plt.show()
+
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to reconstruct signal:\n{e}")
 
-    # ===============================================================
-    # 3️⃣ TEST MODE (built-in validation)
-    # ===============================================================
-    elif choice.lower() == "test":
-        try:
-            print("\n===== TESTING FFT/IFFT MODULE =====")
-
-            # ---- Create a known sine wave ----
-            Fs = 32
-            t = np.arange(32)
-            f0 = 4  # 4 Hz component
-            y = np.sin(2 * np.pi * f0 * t / Fs)
-            print(f"Generated sine wave: f = {f0} Hz, Fs = {Fs} Hz")
-
-            # ---- Apply your manual FFT ----
-            freqs, amp_norm, phase, amp_raw, fft_complex = dft(y, Fs)
-
-            # Find the frequency with maximum amplitude
-            dominant_freq = abs(freqs[np.argmax(amp_raw)])
-            print(f"Detected dominant frequency: {dominant_freq:.2f} Hz")
-
-            # ---- IFFT reconstruction ----
-            reconstructed = idft(fft_complex)
-            err = np.mean(np.abs(reconstructed - y))
-            print(f"Reconstruction mean absolute error: {err:.6f}")
-
-            # ---- Pass/Fail messages ----
-            if abs(dominant_freq - f0) < 0.1 and err < 1e-6:
-                messagebox.showinfo("FFT/IFFT Test", "✅ Test Passed!\nFFT and IFFT working correctly.")
-            else:
-                messagebox.showwarning("FFT/IFFT Test", "⚠️ Test completed but results deviate from expected.")
-
-            # Plot test results
-            plt.figure(figsize=(10, 6))
-            plt.subplot(2, 1, 1)
-            plt.plot(freqs, amp_raw)
-            plt.title("Test FFT Spectrum")
-            plt.xlabel("Frequency (Hz)")
-            plt.ylabel("Amplitude")
-            plt.grid(True)
-
-            plt.subplot(2, 1, 2)
-            plt.plot(t, y, label="Original")
-            plt.plot(t, reconstructed, '--', label="Reconstructed")
-            plt.title("Test: Original vs IFFT-Reconstructed")
-            plt.xlabel("Sample index")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()
-
-        except Exception as e:
-            messagebox.showerror("Test Error", f"Test failed:\n{e}")
-
-    # ===============================================================
-    else:
-        messagebox.showerror("Error", "Invalid choice. Please enter 'fft', 'ifft', or 'test'.")
+    

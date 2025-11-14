@@ -124,8 +124,7 @@ class SignalApp:
         ops_menu.add_command(label="Square", command=self.square_selected)
         ops_menu.add_command(label="Normalize", command=self.normalize_selected)
         ops_menu.add_command(label="Accumulate", command=self.accumulate_selected)
-        ops_menu.add_separator()
-        ops_menu.add_command(label="FFT / IFFT", command=lambda: fft_ifft_handler(self._get_selected_signals()))
+
 
         menubar.add_cascade(label="Operations", menu=ops_menu)
 
@@ -137,6 +136,8 @@ class SignalApp:
         ft_menu = tk.Menu(menubar, tearoff=0)
         ft_menu.add_command(label="Apply Fourier Transform (DFT)", command=self.apply_dft)
         ft_menu.add_command(label="Show Dominant Frequencies", command=self.show_dominant_frequencies)
+        ft_menu.add_separator()
+        ft_menu.add_command(label="FFT / IFFT", command=lambda: fft_ifft_handler(self._get_selected_signals()))
         ft_menu.add_separator()
         ft_menu.add_command(label="Remove DC Component", command=self.remove_dc)
         ft_menu.add_command(label="Modify Components...", command=self.modify_components_dialog)

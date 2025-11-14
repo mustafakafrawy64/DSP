@@ -22,50 +22,99 @@ except ImportError:
         print(f"Error: Could not run test '{name}'. 'CompareSignals.py' not found.")
 
 
+
+# ==========================================================
+#      Manual Recursive FFT / IFFT (Decimation-in-Time)
+# ==========================================================
+def fft_manual(x):
+    """Manual implementation of the Cooley–Tukey FFT (recursive)."""
+    N = len(x)
+    x = np.asarray(x, dtype=complex)
+
+    if N <= 1:
+        return x
+
+    # Split even/odd
+    even = fft_manual(x[::2])
+    odd = fft_manual(x[1::2])
+
+    # Twiddle factors
+    factor = np.exp(-2j * np.pi * np.arange(N) / N)
+
+    return np.concatenate([
+        even + factor[:N // 2] * odd,
+        even - factor[:N // 2] * odd
+    ])
+
+
+def ifft_manual(X):
+    """Manual implementation of the Inverse FFT (recursive)."""
+    N = len(X)
+    X = np.asarray(X, dtype=complex)
+    if N <= 1:
+        return X
+
+    # Split even/odd
+    even = ifft_manual(X[::2])
+    odd = ifft_manual(X[1::2])
+
+    # Twiddle factors (sign flipped)
+    factor = np.exp(2j * np.pi * np.arange(N) / N)
+
+    return np.concatenate([
+        even + factor[:N // 2] * odd,
+        even - factor[:N // 2] * odd
+    ]) / 2
+
+
+# ==========================================================
+#                 Wrapper DFT/IDFT Interface
+# ==========================================================
 def dft(y_values, Fs):
     """
-    Computes the Discrete Fourier Transform (DFT) of a signal.
-
-    Returns:
-        tuple:
-            - frequencies (np.array): Frequency bins.
-            - amplitudes_norm (np.array): Amplitudes normalized from 0 to 1.
-            - phases (np.array): Phases in radians.
-            - amplitudes_unnorm (np.array): Unnormalized amplitudes.
-            - fft_complex (np.array): The raw complex result from np.fft.fft.
+    Manual FFT wrapper returning frequency-domain data.
+    Returns frequencies, normalized amplitude, phase, raw amplitude, complex FFT.
+    Automatically saves a frequency-domain text file after computation.
     """
     N = len(y_values)
     if N == 0:
         return np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
 
-    # Compute the FFT
-    fft_complex = np.fft.fft(y_values)
+    fft_complex = fft_manual(y_values)
+    frequencies = np.arange(N) * Fs / N
 
-    # Compute the corresponding frequencies
-    frequencies = np.fft.fftfreq(N, 1.0 / Fs)
-
-    # Compute unnormalized amplitudes and phases
     amplitudes_unnorm = np.abs(fft_complex)
     phases = np.angle(fft_complex)
 
-    # Normalize amplitudes
     max_amp = np.max(amplitudes_unnorm)
-    if max_amp == 0:
-        amplitudes_norm = amplitudes_unnorm
-    else:
-        amplitudes_norm = amplitudes_unnorm / max_amp
+    amplitudes_norm = amplitudes_unnorm / max_amp if max_amp != 0 else amplitudes_unnorm
+
+    # ===============================================================
+    # 🔽 AUTO-SAVE FREQUENCY DOMAIN RESULTS
+    # ===============================================================
+    try:
+        output_filename = "fft_output_auto.txt"
+        with open(output_filename, "w") as f:
+            f.write("0\n")  # signal type placeholder
+            f.write("0\n")  # periodic placeholder
+            f.write(f"{N}\n")
+            for i in range(N):
+                f.write(f"{amplitudes_unnorm[i]:.6f} {phases[i]:.6f}\n")
+
+        print(f"✅ FFT output automatically saved to: {output_filename}")
+
+    except Exception as e:
+        print(f"⚠️ Could not save FFT output file: {e}")
 
     return frequencies, amplitudes_norm, phases, amplitudes_unnorm, fft_complex
 
-def idft(complex_components):
-    """
-    Computes the Inverse Discrete Fourier Transform (IDFT).
 
-    Returns:
-        np.array: The reconstructed time-domain signal (real part).
-    """
-    ifft_result = np.fft.ifft(complex_components)
-    return np.real(ifft_result)
+
+def idft(complex_components):
+    """Manual Inverse FFT (real part only)."""
+    result = ifft_manual(complex_components)
+    return np.real(result)
+
 
 def get_dominant_frequencies(frequencies, normalized_amplitudes, threshold=0.5):
     """
