@@ -4,6 +4,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import numpy as np
 
+from CompareSignals import SignalsAreEqual
 from signal_model import Signal
 from signal_generator import GenerateSignal
 from utils import unique_name
@@ -124,6 +125,14 @@ class SignalApp:
         ops_menu.add_command(label="Square", command=self.square_selected)
         ops_menu.add_command(label="Normalize", command=self.normalize_selected)
         ops_menu.add_command(label="Accumulate", command=self.accumulate_selected)
+        ops_menu.add_command(label="Convolve (2 signals)", command=self.convolve_selected_signals)
+        ops_menu.add_separator()
+        ops_menu.add_command(label="Correlation (Auto / Cross)", command=self.correlation_dialog)
+        ops_menu.add_command(label="Periodic Cross-Correlation", command=self.periodic_cross_correlation)
+        ops_menu.add_command(label="Time Delay Analysis", command=self.time_delay_analysis)
+
+
+
 
 
         menubar.add_cascade(label="Operations", menu=ops_menu)
@@ -144,6 +153,9 @@ class SignalApp:
         ft_menu.add_separator()
         ft_menu.add_command(label="Reconstruct Signal (IDFT)", command=self.apply_idft)
         ft_menu.add_separator()
+        ft_menu.add_command(label="Remove DC (Time Domain)", command=self.remove_dc_time_domain)
+        ft_menu.add_separator()
+
 
         # --- MODIFIED/NEW TEST MENU ITEMS ---
         ft_menu.add_command(label="Test Signal vs. File... (Time-Domain)", command=self.test_reconstruction_dialog)
@@ -347,8 +359,360 @@ class SignalApp:
         self._refresh_listbox()
 
     # =======================
-    # QUANTIZATION
+    # CONVOLUTION
     # =======================
+    def convolve_selected_signals(self):
+        sels = self._get_selected_signals()
+
+        if len(sels) != 2:
+            messagebox.showwarning("Warning", "Select exactly TWO signals to convolve.")
+            return
+
+        sig1, sig2 = sels
+
+        try:
+            # Convolve using your method in Signal class
+            result = sig1.convolve(sig2, name=unique_name("Conv", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Convolution failed:\n{e}")
+            return
+
+        # Add result to GUI list
+        self.signals.append(result)
+        self._refresh_listbox()
+
+        # Extract x and y for the test
+        indices = [s[0] for s in result.samples]
+        samples = [s[1] for s in result.samples]
+
+        # Run test
+        passed = ConvTest(indices, samples)
+
+        if passed:
+            messagebox.showinfo("Convolution Test", "Conv Test Passed Successfully ✔")
+        else:
+            messagebox.showerror("Convolution Test", "Conv Test FAILED ❌\nCheck console for details.")
+
+        messagebox.showinfo("Convolution Complete", f"New signal '{result.name}' created.")
+
+
+    # =======================
+    # DC REMOVAL
+    # =======================
+    def remove_dc_time_domain(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to remove DC.")
+            return
+
+        sig = sels[0]
+        y_vals = np.array([s[1] for s in sig.samples])
+
+        if len(y_vals) == 0:
+            messagebox.showerror("Error", "Signal has no samples.")
+            return
+
+        # Compute DC and approximate to 3 decimals
+        dc = round(float(np.mean(y_vals)), 3)
+
+        # Subtract DC and round each sample to 3 decimals
+        new_y = [round(float(y - dc), 3) for y in y_vals]
+
+        # Build new signal
+        x_vals = [s[0] for s in sig.samples]
+        new_sig = Signal.from_arrays(
+            x_vals,
+            new_y,
+            signal_type=sig.signal_type,
+            is_periodic=sig.is_periodic,
+            name=unique_name(f"{sig.name}_DC_removed", [s.name for s in self.signals])
+        )
+
+        self.signals.append(new_sig)
+        self._refresh_listbox()
+
+        messagebox.showinfo("Success", f"DC removed (mean={dc:.3f}). New signal created.")
+
+
+    # =======================
+    # CORRELATION
+    # =======================
+    def correlation_dialog(self):
+        """Point 8: Let user pick cross-correlation or auto-correlation."""
+        sels = self._get_selected_signals()
+
+        if len(sels) == 1:
+            choice = messagebox.askquestion(
+                "Auto-Correlation?",
+                "Compute normalized AUTO-correlation of this signal?",
+                icon='question'
+            )
+            if choice == "yes":
+                self.auto_correlation()
+                return
+
+        if len(sels) == 2:
+            choice = messagebox.askquestion(
+                "Cross-Correlation?",
+                "Compute normalized CROSS-correlation between the two signals?",
+                icon='question'
+            )
+            if choice == "yes":
+                self.cross_correlation()
+                return
+
+        messagebox.showerror("Error",
+                             "Invalid selection.\n\n"
+                             "Select:\n"
+                             " - ONE signal → Auto-correlation\n"
+                             " - TWO signals → Cross-correlation")
+
+
+
+
+    # =======================
+    # AUTO-CORRELATION
+    # =======================
+    def auto_correlation(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            return
+        sig = sels[0]
+        x = np.array([s[1] for s in sig.samples], dtype=float)
+        N = len(x)
+
+        # Full-signal mean-subtracted autocorrelation
+        x_mean = np.mean(x)
+        corr_values = []
+        denom = np.sum((x - x_mean)**2)
+        for k in range(N):
+            numerator = np.sum((x[:N-k] - x_mean) * (x[k:] - x_mean))
+            r = numerator / denom if denom != 0 else 0
+            corr_values.append(r)
+
+        lags = np.arange(N)
+        samples = [[int(lags[i]), float(corr_values[i])] for i in range(N)]
+        name = unique_name("AutoCorr", [s.name for s in self.signals])
+        result = Signal(0, 0, samples, name=name)
+        self.signals.append(result)
+        self._refresh_listbox()
+
+        # AUTO TEST
+        test_file = filedialog.askopenfilename(
+            title="Select auto-correlation expected output file",
+            filetypes=[("Text files", "*.txt")]
+        )
+        if test_file:
+            idx = [p[0] for p in result.samples]
+            vals = [p[1] for p in result.samples]
+            Compare_Signals(test_file, idx, vals)
+
+        messagebox.showinfo("Done", f"Auto-correlation created: {name}")
+
+
+    # =======================
+    # CROSS-CORRELATION
+    # =======================
+    def cross_correlation(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 2:
+            messagebox.showerror("Error", "Select exactly TWO signals.")
+            return
+
+        s1, s2 = sels
+        x = [float(p[1]) for p in s1.samples]
+        y = [float(p[1]) for p in s2.samples]
+
+        N = len(x)
+
+        # ===== FULL-SIGNAL ENERGY NORMALIZATION (Correct for your tests) =====
+        Ex = sum(v * v for v in x)
+        Ey = sum(v * v for v in y)
+        norm = (Ex * Ey) ** 0.5
+        if norm == 0:
+            norm = 1
+
+        corr_values = []
+
+        # ===== STANDARD CROSS-CORRELATION (NO MEAN SUBTRACTION) =====
+        for k in range(N):
+            total = 0.0
+            for i in range(N - k):
+                total += x[i] * y[i + k]
+
+            r = total / norm
+            corr_values.append(round(r, 8))
+
+        # ===== Build samples =====
+        samples = [[k, float(corr_values[k])] for k in range(N)]
+
+        name = unique_name("CrossCorr", [s.name for s in self.signals])
+        result = Signal(0, 1, samples, name=name)
+        self.signals.append(result)
+        self._refresh_listbox()
+
+        # Comparison test
+        test_file = filedialog.askopenfilename(
+            title="Select cross-correlation expected output file",
+            filetypes=[("Text files", "*.txt")]
+        )
+        if test_file:
+            idx = [p[0] for p in result.samples]
+            vals = [p[1] for p in result.samples]
+            Compare_Signals(test_file, idx, vals)
+
+        messagebox.showinfo("Done", f"Cross-correlation created: {name}")
+
+
+
+
+
+    # =======================
+    # PERIODIC (CIRCULAR) CROSS-CORRELATION
+    # =======================
+    def periodic_cross_correlation(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 2:
+            messagebox.showerror("Error", "Select exactly TWO periodic signals.")
+            return
+
+        s1, s2 = sels
+        x = np.array([p[1] for p in s1.samples], dtype=float)
+        y = np.array([p[1] for p in s2.samples], dtype=float)
+
+        # === Read expected output length from test file ===
+        test_file = filedialog.askopenfilename(
+            title="Select periodic cross-correlation expected output file",
+            filetypes=[("Text files", "*.txt")]
+        )
+        if not test_file:
+            messagebox.showwarning("No file", "No test file selected — cannot determine correct length.")
+            return
+
+        with open(test_file, "r") as f:
+            header = f.readlines()
+
+        try:
+            L = int(header[2].strip())   # Output length
+        except:
+            messagebox.showerror("Error", "Cannot read output length from test file header.")
+            return
+
+        # === Zero-pad both signals to length L ===
+        x_ext = np.zeros(L)
+        y_ext = np.zeros(L)
+
+        x_ext[:len(x)] = x
+        y_ext[:len(y)] = y
+
+        # === Energy normalization (correct DSP method) ===
+        Ex = np.sum(x_ext**2)
+        Ey = np.sum(y_ext**2)
+        norm = np.sqrt(Ex * Ey)
+
+        if norm == 0:
+            norm = 1
+
+        # === Compute periodic cross-correlation ===
+        corr_values = []
+        for k in range(L):
+            total = 0.0
+            for i in range(L):
+                total += x_ext[i] * y_ext[(i + k) % L]
+            corr_values.append(total / norm)
+
+        # === Build samples ===
+        samples = [[i, float(corr_values[i])] for i in range(L)]
+        name = unique_name("PeriodicCrossCorr", [s.name for s in self.signals])
+        result = Signal(0, 1, samples, name=name)
+        self.signals.append(result)
+        self._refresh_listbox()
+
+        # === Run test ===
+        idx = [p[0] for p in result.samples]
+        vals = [p[1] for p in result.samples]
+        Compare_Signals(test_file, idx, vals)
+
+        messagebox.showinfo("Done", f"Periodic cross-correlation created: {name}")
+
+
+    #####################
+    # TIME-DELAY ANALYSIS
+    #####################
+    def time_delay_analysis(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 2:
+            messagebox.showerror("Error", "Select exactly TWO periodic signals.")
+            return
+
+        s1, s2 = sels
+        x = np.array([p[1] for p in s1.samples], dtype=float)
+        y = np.array([p[1] for p in s2.samples], dtype=float)
+
+        # ===== Ask for Ts =====
+        Ts = simpledialog.askstring("Sampling Period", "Enter Sampling Period Ts:")
+        if Ts is None:
+            return
+        try:
+            Ts = float(Ts)
+        except:
+            messagebox.showerror("Error", "Invalid Ts value.")
+            return
+
+        N = len(x)
+        M = len(y)
+
+        # ===== LCM periodic length =====
+        L = np.lcm(N, M)
+
+        # ===== Expand both signals to periodic length =====
+        x_tile = np.tile(x, L // N)
+        y_tile = np.tile(y, L // M)
+
+        # ===== Energy normalization =====
+        Ex = np.sum(x_tile * x_tile)
+        Ey = np.sum(y_tile * y_tile)
+        norm = np.sqrt(Ex * Ey)
+        if norm == 0:
+            norm = 1
+
+        # ===== Periodic Cross-Correlation =====
+        corr_values = []
+        for k in range(L):
+            y_shift = np.roll(y_tile, -k)
+            r = np.dot(x_tile, y_shift) / norm
+            corr_values.append(r)
+
+        corr_values = np.array(corr_values)
+
+        # ===== Find maximum absolute correlation =====
+        j = int(np.argmax(np.abs(corr_values)))
+        max_corr = float(corr_values[j])
+
+        # ===== Compute time delay =====
+        time_delay = j * Ts
+
+        # ===== Create correlation signal for GUI plotting =====
+        samples = [[i, float(corr_values[i])] for i in range(L)]
+        name = unique_name("TimeDelayCorr", [s.name for s in self.signals])
+        result = Signal(0, 1, samples, name=name)
+        self.signals.append(result)
+        self._refresh_listbox()
+
+        # ===== Show result =====
+        messagebox.showinfo(
+            "Time Delay Analysis",
+            f"Maximum Correlation: {max_corr:.6f}\n"
+            f"Lag j = {j}\n"
+            f"Sampling Period Ts = {Ts}\n\n"
+            f"Estimated Time Delay = {time_delay} seconds"
+        )
+
+
+
+     # =======================
+     # QUANTIZATION
+     # =======================
     def quantize_selected_signal(self):
         sels = self._get_selected_signals()
         if len(sels) != 1:
@@ -740,3 +1104,80 @@ class SignalApp:
         messagebox.showinfo("Test Complete",
                             "Frequency-Domain test finished.\n\n"
                             "Please check your console (terminal) for 'passed' or 'failed' messages.")
+        
+
+
+
+#TESTS
+
+def ConvTest(Your_indices, Your_samples): 
+    """
+    Test inputs
+    InputIndicesSignal1 =[-2, -1, 0, 1]
+    InputSamplesSignal1 = [1, 2, 1, 1 ]
+    
+    InputIndicesSignal2=[0, 1, 2, 3, 4, 5 ]
+    InputSamplesSignal2 = [ 1, -1, 0, 0, 1, 1 ]
+    """
+    
+    expected_indices=[-2, -1, 0, 1, 2, 3, 4, 5, 6]
+    expected_samples = [1, 1, -1, 0, 0, 3, 3, 2, 1 ]
+
+    if (len(expected_samples)!=len(Your_samples)) and (len(expected_indices)!=len(Your_indices)):
+        print("Conv Test case failed, your signal have different length from the expected one")
+        return False
+
+    for i in range(len(Your_indices)):
+        if(Your_indices[i]!=expected_indices[i]):
+            print("Conv Test case failed, your signal have different indicies from the expected one") 
+            return False
+
+    for i in range(len(expected_samples)):
+        if abs(Your_samples[i] - expected_samples[i]) < 0.01:
+            continue
+        else:
+            print("Conv Test case failed, your signal have different values from the expected one") 
+            return False
+
+    print("Conv Test case passed successfully")
+    return True
+
+
+
+def Compare_Signals(file_name,Your_indices,Your_samples):      
+    expected_indices=[]
+    expected_samples=[]
+    with open(file_name, 'r') as f:
+        line = f.readline()
+        line = f.readline()
+        line = f.readline()
+        line = f.readline()
+        while line:
+            # process line
+            L=line.strip()
+            if len(L.split(' '))==2:
+                L=line.split(' ')
+                V1=int(L[0])
+                V2=float(L[1])
+                expected_indices.append(V1)
+                expected_samples.append(V2)
+                line = f.readline()
+            else:
+                break
+    print("Current Output Test file is: ")
+    print(file_name)
+    print("\n")
+    if (len(expected_samples)!=len(Your_samples)) and (len(expected_indices)!=len(Your_indices)):
+        print("Shift_Fold_Signal Test case failed, your signal have different length from the expected one")
+        return
+    for i in range(len(Your_indices)):
+        if(Your_indices[i]!=expected_indices[i]):
+            print("Shift_Fold_Signal Test case failed, your signal have different indicies from the expected one") 
+            return
+    for i in range(len(expected_samples)):
+        if abs(Your_samples[i] - expected_samples[i]) < 0.01:
+            continue
+        else:
+            print("Correlation Test case failed, your signal have different values from the expected one") 
+            return
+    print("Correlation Test case passed successfully")

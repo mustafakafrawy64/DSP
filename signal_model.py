@@ -1,6 +1,8 @@
 import numpy as np
 from tkinter import messagebox
 import os
+from CompareSignals import SignalsAreEqual
+from utils import unique_name
 
 class Signal:
     def __init__(self, signal_type, is_periodic, samples, name=None):
@@ -100,3 +102,39 @@ class Signal:
             acc += y
             res.append([x, acc])
         return Signal(self.signal_type, self.is_periodic, res, name=f"{self.name}_accum")
+
+
+# Convolution
+
+    def convolve(self, other, name=None):
+
+        y1 = np.array([s[1] for s in self.samples])
+        y2 = np.array([s[1] for s in other.samples])
+
+        if len(y1) == 0 or len(y2) == 0:
+            return Signal(self.signal_type, self.is_periodic, [], name=name or "Conv")
+
+        # Compute convolution
+        y_conv = np.convolve(y1, y2)
+
+        # Round to 3 decimals
+        y_conv = [round(float(v), 3) for v in y_conv]
+
+        # X spacing taken from first signal
+        x_vals = [s[0] for s in self.samples]
+        if len(x_vals) < 2:
+            dx = 1.0
+        else:
+            dx = x_vals[1] - x_vals[0]
+
+        # Build new X-axis
+        x0 = x_vals[0]
+        x_conv = [x0 + i * dx for i in range(len(y_conv))]
+
+        return Signal(
+            self.signal_type,
+            self.is_periodic,
+            samples=[[float(x_conv[i]), float(y_conv[i])] for i in range(len(y_conv))],
+            name=name or f"{self.name}_conv_{other.name}"
+        )
+
