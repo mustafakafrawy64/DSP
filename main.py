@@ -1,3 +1,4 @@
+# main.py
 import tkinter as tk
 from tkinter import simpledialog, filedialog, messagebox
 from gui import SignalApp
@@ -28,7 +29,6 @@ def force_dialogs_above_root(root):
 if __name__ == "__main__":
     root = tk.Tk()
     app = SignalApp(root)
-
 
     force_dialogs_above_root(root)
 

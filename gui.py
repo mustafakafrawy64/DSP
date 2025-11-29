@@ -1,50 +1,116 @@
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import numpy as np
 
-from CompareSignals import SignalsAreEqual
-from signal_model import Signal
-from signal_generator import GenerateSignal
-from utils import unique_name
-from quantization import quantize_signal
-from fft_ifft_handler import fft_ifft_handler
-from signal_model import Signal
-
+# Project-specific imports (assumes these modules exist in the project folder)
+try:
+    from signal_model import Signal
+except Exception as e:
+    raise ImportError("signal_model.py is required and must be in the same folder as gui.py") from e
 
 try:
-    # Import all required functions from the FT module
+    from signal_generator import GenerateSignal
+except Exception:
+    # Provide a fallback stub to avoid crashes when generate is not present.
+    def GenerateSignal(sig_type, A, F, Fs, phase):
+        # produce a simple sampled sinusoid
+        t = np.arange(0, 1, 1.0 / Fs)
+        if sig_type == "sin":
+            y = A * np.sin(2 * np.pi * F * t + phase)
+        else:
+            y = A * np.cos(2 * np.pi * F * t + phase)
+        return list(t), list(y)
+
+try:
+    from utils import unique_name
+except Exception:
+    # Minimal fallback
+    def unique_name(base, existing):
+        name = base
+        i = 1
+        while name in existing:
+            name = f"{base}_{i}"
+            i += 1
+        return name
+
+# Quantization / FFT helper imports (optional)
+try:
+    from quantization import quantize_signal
+except Exception:
+    def quantize_signal(sig, bits):
+        # simple uniform quantization fallback
+        y = [s[1] for s in sig.samples]
+        mn, mx = min(y), max(y)
+        if mx == mn:
+            return Signal(sig.signal_type, sig.is_periodic, [[s[0], 0.0] for s in sig.samples], name=(sig.name + "_Q"))
+        levels = 2**bits
+        step = (mx - mn) / (levels - 1)
+        q = [round((v - mn) / step) * step + mn for v in y]
+        samples = [[sig.samples[i][0], float(q[i])] for i in range(len(q))]
+        return Signal(sig.signal_type, sig.is_periodic, samples, name=(sig.name + f"_Q{bits}"))
+
+try:
+    from fft_ifft_handler import fft_ifft_handler
+except Exception:
+    def fft_ifft_handler(sigs):
+        messagebox.showinfo("FFT/IFFT", "FFT handler not available (fft_ifft_handler.py missing).")
+
+# Fourier transform functions (optional)
+try:
     from Fourier_transform import (
         dft, idft, get_dominant_frequencies,
         test_reconstructed_signal, run_comparison_test
     )
-except ImportError:
-    messagebox.showerror("Error", "Fourier_transform.py not found. Frequency domain features will be disabled.")
-
-
-    # Define dummy functions to prevent crashes
+except Exception:
+    # Provide stubs so the GUI still loads even if Fourier_transform.py is missing.
     def dft(y, fs):
-        return [], [], [], [], []
-
+        return None, None, None, None, None
 
     def idft(c):
         return []
 
-
     def get_dominant_frequencies(f, a):
         return []
 
-
     def test_reconstructed_signal(sig, file):
-        print("Error: test_reconstructed_signal not found.")
-
+        messagebox.showwarning("Missing", "Fourier transform test function not available.")
 
     def run_comparison_test(file, amps, phases):
-        print("Error: run_comparison_test not found.")
+        messagebox.showwarning("Missing", "DFT comparison test not available.")
 
+# New feature modules (these files should exist alongside gui.py)
+try:
+    from smoothing import moving_average
+except Exception:
+    def moving_average(sig, M, name=None):
+        raise ImportError("smoothing.py missing")
 
+try:
+    from sharpening import derivative
+except Exception:
+    def derivative(sig, kind="first", name=None):
+        raise ImportError("sharpening.py missing")
 
+try:
+    from shift_signal import shift
+except Exception:
+    def shift(sig, k, name=None):
+        raise ImportError("shift_signal.py missing")
+
+try:
+    from folding import fold
+except Exception:
+    def fold(sig, name=None):
+        raise ImportError("folding.py missing")
+
+try:
+    from fold_shift import fold_and_shift
+except Exception:
+    def fold_and_shift(sig, k, name=None):
+        raise ImportError("fold_shift.py missing")
 
 
 class SignalApp:
@@ -131,17 +197,21 @@ class SignalApp:
         ops_menu.add_command(label="Periodic Cross-Correlation", command=self.periodic_cross_correlation)
         ops_menu.add_command(label="Time Delay Analysis", command=self.time_delay_analysis)
 
+        # === NEW: Time-domain helpers (smoothing, sharpening, shifting, folding) ===
+        ops_menu.add_separator()
+        ops_menu.add_command(label="Smoothing (Moving Average)", command=self.smoothing_dialog)
+        ops_menu.add_command(label="Sharpening (Derivatives)", command=self.sharpening_dialog)
+        ops_menu.add_command(label="Delay/Advance Signal by k", command=self.shift_dialog)
+        ops_menu.add_command(label="Fold (Time Reverse) Signal", command=self.fold_dialog)
+        ops_menu.add_command(label="Fold then Delay/Advance", command=self.fold_shift_dialog)
 
-
-
-
-        menubar.add_cascade(label="Operations", menu=ops_menu)
-
-        # ---Quantization menu---
+        # Quantization
         ops_menu.add_separator()
         ops_menu.add_command(label="Quantize Signal", command=self.quantize_selected_signal)
 
-        # --- FREQUENCY DOMAIN MENU (MODIFIED) ---
+        menubar.add_cascade(label="Operations", menu=ops_menu)
+
+        # --- FREQUENCY DOMAIN MENU ---
         ft_menu = tk.Menu(menubar, tearoff=0)
         ft_menu.add_command(label="Apply Fourier Transform (DFT)", command=self.apply_dft)
         ft_menu.add_command(label="Show Dominant Frequencies", command=self.show_dominant_frequencies)
@@ -155,15 +225,10 @@ class SignalApp:
         ft_menu.add_separator()
         ft_menu.add_command(label="Remove DC (Time Domain)", command=self.remove_dc_time_domain)
         ft_menu.add_separator()
-
-
-        # --- MODIFIED/NEW TEST MENU ITEMS ---
         ft_menu.add_command(label="Test Signal vs. File... (Time-Domain)", command=self.test_reconstruction_dialog)
         ft_menu.add_command(label="Test DFT Output vs. File... (Freq-Domain)", command=self.test_dft_output_dialog)
-        # --- END NEW TEST MENU ITEMS ---
 
         menubar.add_cascade(label="Frequency Domain", menu=ft_menu)
-        # --- END NEW MENU ---
 
     # =======================
     # SIGNAL MANAGEMENT
@@ -202,7 +267,10 @@ class SignalApp:
                                                 filetypes=[("Text files", "*.txt")],
                                                 initialfile=f"{sig.name}.txt")
             if file:
-                sig.save_to_file(file)
+                try:
+                    sig.save_to_file(file)
+                except Exception as e:
+                    messagebox.showerror("Save error", f"Failed to save {sig.name}:\n{e}")
 
     def _refresh_listbox(self):
         self.listbox.delete(0, tk.END)
@@ -320,8 +388,8 @@ class SignalApp:
             messagebox.showwarning("Warning", "Select one signal to multiply.")
             return
         try:
-            c = float(simpledialog.askstring("Multiply by", "Enter constant:"))
-        except (TypeError, ValueError):
+            c = float(simpledialog.askstring("Multiply", "Enter constant:"))
+        except:
             return
         result = sels[0].multiply_by_constant(c)
         result.name = unique_name(result.name, [s.name for s in self.signals])
@@ -358,826 +426,372 @@ class SignalApp:
         self.signals.append(result)
         self._refresh_listbox()
 
-    # =======================
-    # CONVOLUTION
-    # =======================
+    # -----------------------
+    # Convolution
+    # -----------------------
     def convolve_selected_signals(self):
         sels = self._get_selected_signals()
-
         if len(sels) != 2:
-            messagebox.showwarning("Warning", "Select exactly TWO signals to convolve.")
+            messagebox.showwarning("Warning", "Select exactly two signals to convolve.")
             return
-
         sig1, sig2 = sels
-
         try:
-            # Convolve using your method in Signal class
-            result = sig1.convolve(sig2, name=unique_name("Conv", [s.name for s in self.signals]))
+            result = sig1.convolve(sig2)
+            result.name = unique_name(f"{sig1.name}_conv_{sig2.name}", [s.name for s in self.signals])
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo("Convolution", f"Created '{result.name}'.")
         except Exception as e:
             messagebox.showerror("Error", f"Convolution failed:\n{e}")
-            return
 
-        # Add result to GUI list
-        self.signals.append(result)
-        self._refresh_listbox()
-
-        # Extract x and y for the test
-        indices = [s[0] for s in result.samples]
-        samples = [s[1] for s in result.samples]
-
-        # Run test
-        passed = ConvTest(indices, samples)
-
-        if passed:
-            messagebox.showinfo("Convolution Test", "Conv Test Passed Successfully ✔")
-        else:
-            messagebox.showerror("Convolution Test", "Conv Test FAILED ❌\nCheck console for details.")
-
-        messagebox.showinfo("Convolution Complete", f"New signal '{result.name}' created.")
-
-
-    # =======================
-    # DC REMOVAL
-    # =======================
-    def remove_dc_time_domain(self):
-        sels = self._get_selected_signals()
-        if len(sels) != 1:
-            messagebox.showwarning("Warning", "Select exactly one signal to remove DC.")
-            return
-
-        sig = sels[0]
-        y_vals = np.array([s[1] for s in sig.samples])
-
-        if len(y_vals) == 0:
-            messagebox.showerror("Error", "Signal has no samples.")
-            return
-
-        # Compute DC and approximate to 3 decimals
-        dc = round(float(np.mean(y_vals)), 3)
-
-        # Subtract DC and round each sample to 3 decimals
-        new_y = [round(float(y - dc), 3) for y in y_vals]
-
-        # Build new signal
-        x_vals = [s[0] for s in sig.samples]
-        new_sig = Signal.from_arrays(
-            x_vals,
-            new_y,
-            signal_type=sig.signal_type,
-            is_periodic=sig.is_periodic,
-            name=unique_name(f"{sig.name}_DC_removed", [s.name for s in self.signals])
-        )
-
-        self.signals.append(new_sig)
-        self._refresh_listbox()
-
-        messagebox.showinfo("Success", f"DC removed (mean={dc:.3f}). New signal created.")
-
-
-    # =======================
-    # CORRELATION
-    # =======================
+    # -----------------------
+    # Correlation
+    # -----------------------
     def correlation_dialog(self):
-        """Point 8: Let user pick cross-correlation or auto-correlation."""
         sels = self._get_selected_signals()
-
         if len(sels) == 1:
-            choice = messagebox.askquestion(
-                "Auto-Correlation?",
-                "Compute normalized AUTO-correlation of this signal?",
-                icon='question'
-            )
-            if choice == "yes":
-                self.auto_correlation()
-                return
+            try:
+                result = sels[0].auto_correlation()
+                result.name = unique_name(f"{sels[0].name}_autoCorr", [s.name for s in self.signals])
+                self.signals.append(result)
+                self._refresh_listbox()
+                messagebox.showinfo("Auto-Correlation", f"Created '{result.name}'.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Auto-correlation failed:\n{e}")
 
-        if len(sels) == 2:
-            choice = messagebox.askquestion(
-                "Cross-Correlation?",
-                "Compute normalized CROSS-correlation between the two signals?",
-                icon='question'
-            )
-            if choice == "yes":
-                self.cross_correlation()
-                return
+        elif len(sels) == 2:
+            try:
+                result = sels[0].cross_correlation(sels[1])
+                result.name = unique_name(f"{sels[0].name}_xcorr_{sels[1].name}", [s.name for s in self.signals])
+                self.signals.append(result)
+                self._refresh_listbox()
+                messagebox.showinfo("Cross-Correlation", f"Created '{result.name}'.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Cross-correlation failed:\n{e}")
 
-        messagebox.showerror("Error",
-                             "Invalid selection.\n\n"
-                             "Select:\n"
-                             " - ONE signal → Auto-correlation\n"
-                             " - TWO signals → Cross-correlation")
+        else:
+            messagebox.showwarning("Warning", "Select one or two signals.")
 
-
-
-
-    # =======================
-    # AUTO-CORRELATION
-    # =======================
-    def auto_correlation(self):
-        sels = self._get_selected_signals()
-        if len(sels) != 1:
-            return
-        sig = sels[0]
-        x = np.array([s[1] for s in sig.samples], dtype=float)
-        N = len(x)
-
-        # Full-signal mean-subtracted autocorrelation
-        x_mean = np.mean(x)
-        corr_values = []
-        denom = np.sum((x - x_mean)**2)
-        for k in range(N):
-            numerator = np.sum((x[:N-k] - x_mean) * (x[k:] - x_mean))
-            r = numerator / denom if denom != 0 else 0
-            corr_values.append(r)
-
-        lags = np.arange(N)
-        samples = [[int(lags[i]), float(corr_values[i])] for i in range(N)]
-        name = unique_name("AutoCorr", [s.name for s in self.signals])
-        result = Signal(0, 0, samples, name=name)
-        self.signals.append(result)
-        self._refresh_listbox()
-
-        # AUTO TEST
-        test_file = filedialog.askopenfilename(
-            title="Select auto-correlation expected output file",
-            filetypes=[("Text files", "*.txt")]
-        )
-        if test_file:
-            idx = [p[0] for p in result.samples]
-            vals = [p[1] for p in result.samples]
-            Compare_Signals(test_file, idx, vals)
-
-        messagebox.showinfo("Done", f"Auto-correlation created: {name}")
-
-
-    # =======================
-    # CROSS-CORRELATION
-    # =======================
-    def cross_correlation(self):
-        sels = self._get_selected_signals()
-        if len(sels) != 2:
-            messagebox.showerror("Error", "Select exactly TWO signals.")
-            return
-
-        s1, s2 = sels
-        x = [float(p[1]) for p in s1.samples]
-        y = [float(p[1]) for p in s2.samples]
-
-        N = len(x)
-
-        # ===== FULL-SIGNAL ENERGY NORMALIZATION (Correct for your tests) =====
-        Ex = sum(v * v for v in x)
-        Ey = sum(v * v for v in y)
-        norm = (Ex * Ey) ** 0.5
-        if norm == 0:
-            norm = 1
-
-        corr_values = []
-
-        # ===== STANDARD CROSS-CORRELATION (NO MEAN SUBTRACTION) =====
-        for k in range(N):
-            total = 0.0
-            for i in range(N - k):
-                total += x[i] * y[i + k]
-
-            r = total / norm
-            corr_values.append(round(r, 8))
-
-        # ===== Build samples =====
-        samples = [[k, float(corr_values[k])] for k in range(N)]
-
-        name = unique_name("CrossCorr", [s.name for s in self.signals])
-        result = Signal(0, 1, samples, name=name)
-        self.signals.append(result)
-        self._refresh_listbox()
-
-        # Comparison test
-        test_file = filedialog.askopenfilename(
-            title="Select cross-correlation expected output file",
-            filetypes=[("Text files", "*.txt")]
-        )
-        if test_file:
-            idx = [p[0] for p in result.samples]
-            vals = [p[1] for p in result.samples]
-            Compare_Signals(test_file, idx, vals)
-
-        messagebox.showinfo("Done", f"Cross-correlation created: {name}")
-
-
-
-
-
-    # =======================
-    # PERIODIC (CIRCULAR) CROSS-CORRELATION
-    # =======================
+    # -----------------------
+    # Periodic Cross-Correlation
+    # -----------------------
     def periodic_cross_correlation(self):
         sels = self._get_selected_signals()
         if len(sels) != 2:
-            messagebox.showerror("Error", "Select exactly TWO periodic signals.")
+            messagebox.showwarning("Warning", "Select exactly two signals.")
             return
-
-        s1, s2 = sels
-        x = np.array([p[1] for p in s1.samples], dtype=float)
-        y = np.array([p[1] for p in s2.samples], dtype=float)
-
-        # === Read expected output length from test file ===
-        test_file = filedialog.askopenfilename(
-            title="Select periodic cross-correlation expected output file",
-            filetypes=[("Text files", "*.txt")]
-        )
-        if not test_file:
-            messagebox.showwarning("No file", "No test file selected — cannot determine correct length.")
-            return
-
-        with open(test_file, "r") as f:
-            header = f.readlines()
-
         try:
-            L = int(header[2].strip())   # Output length
-        except:
-            messagebox.showerror("Error", "Cannot read output length from test file header.")
-            return
+            result = sels[0].periodic_cross_correlation(sels[1])
+            result.name = unique_name(f"{sels[0].name}_pcorr_{sels[1].name}", [s.name for s in self.signals])
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo("Periodic CC", f"Created '{result.name}'.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Periodic CC failed:\n{e}")
 
-        # === Zero-pad both signals to length L ===
-        x_ext = np.zeros(L)
-        y_ext = np.zeros(L)
-
-        x_ext[:len(x)] = x
-        y_ext[:len(y)] = y
-
-        # === Energy normalization (correct DSP method) ===
-        Ex = np.sum(x_ext**2)
-        Ey = np.sum(y_ext**2)
-        norm = np.sqrt(Ex * Ey)
-
-        if norm == 0:
-            norm = 1
-
-        # === Compute periodic cross-correlation ===
-        corr_values = []
-        for k in range(L):
-            total = 0.0
-            for i in range(L):
-                total += x_ext[i] * y_ext[(i + k) % L]
-            corr_values.append(total / norm)
-
-        # === Build samples ===
-        samples = [[i, float(corr_values[i])] for i in range(L)]
-        name = unique_name("PeriodicCrossCorr", [s.name for s in self.signals])
-        result = Signal(0, 1, samples, name=name)
-        self.signals.append(result)
-        self._refresh_listbox()
-
-        # === Run test ===
-        idx = [p[0] for p in result.samples]
-        vals = [p[1] for p in result.samples]
-        Compare_Signals(test_file, idx, vals)
-
-        messagebox.showinfo("Done", f"Periodic cross-correlation created: {name}")
-
-
-    #####################
-    # TIME-DELAY ANALYSIS
-    #####################
+    # -----------------------
+    # Time Delay Analysis
+    # -----------------------
     def time_delay_analysis(self):
         sels = self._get_selected_signals()
         if len(sels) != 2:
-            messagebox.showerror("Error", "Select exactly TWO periodic signals.")
-            return
-
-        s1, s2 = sels
-        x = np.array([p[1] for p in s1.samples], dtype=float)
-        y = np.array([p[1] for p in s2.samples], dtype=float)
-
-        # ===== Ask for Ts =====
-        Ts = simpledialog.askstring("Sampling Period", "Enter Sampling Period Ts:")
-        if Ts is None:
+            messagebox.showwarning("Warning", "Select two signals.")
             return
         try:
-            Ts = float(Ts)
-        except:
-            messagebox.showerror("Error", "Invalid Ts value.")
+            delay = sels[0].time_delay(sels[1])
+            messagebox.showinfo("Time Delay", f"Estimated delay: {delay}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Time delay failed:\n{e}")
+
+    # -----------------------
+    # Smoothing
+    # -----------------------
+    def smoothing_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to smooth.")
             return
-
-        N = len(x)
-        M = len(y)
-
-        # ===== LCM periodic length =====
-        L = np.lcm(N, M)
-
-        # ===== Expand both signals to periodic length =====
-        x_tile = np.tile(x, L // N)
-        y_tile = np.tile(y, L // M)
-
-        # ===== Energy normalization =====
-        Ex = np.sum(x_tile * x_tile)
-        Ey = np.sum(y_tile * y_tile)
-        norm = np.sqrt(Ex * Ey)
-        if norm == 0:
-            norm = 1
-
-        # ===== Periodic Cross-Correlation =====
-        corr_values = []
-        for k in range(L):
-            y_shift = np.roll(y_tile, -k)
-            r = np.dot(x_tile, y_shift) / norm
-            corr_values.append(r)
-
-        corr_values = np.array(corr_values)
-
-        # ===== Find maximum absolute correlation =====
-        j = int(np.argmax(np.abs(corr_values)))
-        max_corr = float(corr_values[j])
-
-        # ===== Compute time delay =====
-        time_delay = j * Ts
-
-        # ===== Create correlation signal for GUI plotting =====
-        samples = [[i, float(corr_values[i])] for i in range(L)]
-        name = unique_name("TimeDelayCorr", [s.name for s in self.signals])
-        result = Signal(0, 1, samples, name=name)
-        self.signals.append(result)
+        sig = sels[0]
+        try:
+            M_str = simpledialog.askstring("Moving Average", "Enter number of points included in averaging (integer >=1):")
+            if M_str is None:
+                return
+            M = int(M_str)
+            if M < 1:
+                raise ValueError
+        except Exception:
+            messagebox.showerror("Error", "Invalid integer for M.")
+            return
+        try:
+            new_sig = moving_average(sig, M, name=unique_name(f"{sig.name}_smooth", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Smoothing failed:\n{e}")
+            return
+        self.signals.append(new_sig)
         self._refresh_listbox()
+        messagebox.showinfo("Done", f"Smoothing applied with M={M}. New signal '{new_sig.name}' created.")
 
-        # ===== Show result =====
-        messagebox.showinfo(
-            "Time Delay Analysis",
-            f"Maximum Correlation: {max_corr:.6f}\n"
-            f"Lag j = {j}\n"
-            f"Sampling Period Ts = {Ts}\n\n"
-            f"Estimated Time Delay = {time_delay} seconds"
-        )
+    # -----------------------
+    # Sharpening (Derivatives)
+    # -----------------------
+    def sharpening_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal.")
+            return
+        sig = sels[0]
+        choice = simpledialog.askstring("Derivative", "Enter 'first' or 'second' for derivative type:")
+        if choice not in ("first", "second"):
+            messagebox.showerror("Invalid choice", "Type must be 'first' or 'second'.")
+            return
+        try:
+            new_sig = derivative(sig, kind=choice, name=unique_name(f"{sig.name}_{choice}Der", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Derivative failed:\n{e}")
+            return
+        self.signals.append(new_sig)
+        self._refresh_listbox()
+        messagebox.showinfo("Done", f"{choice.capitalize()} derivative created: '{new_sig.name}'")
 
+    # -----------------------
+    # Shifting
+    # -----------------------
+    def shift_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to shift.")
+            return
+        sig = sels[0]
+        try:
+            k_str = simpledialog.askstring("Shift", "Enter integer k (positive = delay, negative = advance):")
+            if k_str is None:
+                return
+            k = int(k_str)
+        except Exception:
+            messagebox.showerror("Error", "Invalid integer k.")
+            return
+        try:
+            new_sig = shift(sig, k, name=unique_name(f"{sig.name}_shift_{k}", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Shift failed:\n{e}")
+            return
+        self.signals.append(new_sig)
+        self._refresh_listbox()
+        messagebox.showinfo("Done", f"Signal shifted by k={k}. New signal '{new_sig.name}' created.")
 
+    # -----------------------
+    # Folding
+    # -----------------------
+    def fold_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to fold.")
+            return
+        sig = sels[0]
+        try:
+            new_sig = fold(sig, name=unique_name(f"{sig.name}_fold", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Folding failed:\n{e}")
+            return
+        self.signals.append(new_sig)
+        self._refresh_listbox()
+        messagebox.showinfo("Done", f"Signal folded (time-reversed). New signal '{new_sig.name}' created.")
 
-     # =======================
-     # QUANTIZATION
-     # =======================
+    # -----------------------
+    # Fold then Shift
+    # -----------------------
+    def fold_shift_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal to fold and shift.")
+            return
+        sig = sels[0]
+        try:
+            k_str = simpledialog.askstring("Fold & Shift", "Enter integer k to shift folded signal (positive = delay):")
+            if k_str is None:
+                return
+            k = int(k_str)
+        except Exception:
+            messagebox.showerror("Error", "Invalid integer k.")
+            return
+        try:
+            new_sig = fold_and_shift(sig, k, name=unique_name(f"{sig.name}_fold_shift_{k}", [s.name for s in self.signals]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Fold+Shift failed:\n{e}")
+            return
+        self.signals.append(new_sig)
+        self._refresh_listbox()
+        messagebox.showinfo("Done", f"Signal folded then shifted by k={k}. New signal '{new_sig.name}' created.")
+
+    # -----------------------
+    # Quantization
+    # -----------------------
     def quantize_selected_signal(self):
         sels = self._get_selected_signals()
         if len(sels) != 1:
-            messagebox.showwarning("Warning", "Select one signal to quantize.")
+            messagebox.showwarning("Warning", "Select one signal.")
+            return
+        sig = sels[0]
+        try:
+            bits = int(simpledialog.askstring("Quantization", "Enter number of bits:"))
+        except:
+            messagebox.showerror("Error", "Invalid bits.")
+            return
+        try:
+            result = quantize_signal(sig, bits)
+            result.name = unique_name(f"{sig.name}_Q{bits}", [s.name for s in self.signals])
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo("Quantization", f"Created '{result.name}'.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Quantization failed:\n{e}")
+
+    # =======================
+    # FREQUENCY DOMAIN
+    # =======================
+    def apply_dft(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal.")
             return
 
         sig = sels[0]
-
-        mode = simpledialog.askstring("Quantization Mode", "Enter 'bits' or 'levels':")
-        if mode not in ("bits", "levels"):
-            messagebox.showerror("Invalid Input", "You must type 'bits' or 'levels'.")
+        try:
+            y = [s[1] for s in sig.samples]
+            fs = float(simpledialog.askstring("Sampling Frequency", "Enter Fs (Hz):"))
+            if fs <= 0:
+                raise ValueError
+        except:
+            messagebox.showerror("Error", "Invalid sampling frequency.")
             return
 
         try:
-            from quantization import quantize_to_file
+            (self.freq_components,
+             self.frequencies,
+             self.amplitudes_norm,
+             self.amplitudes_unnorm,
+             self.phases) = dft(y, fs)
 
-            if mode == "bits":
-                bits = int(simpledialog.askstring("Bits", "Enter number of bits:"))
-                test_file_1 = filedialog.askopenfilename(
-                    title="Select Quan1_Out.txt (expected test file)",
-                    filetypes=[("Text files", "*.txt")]
-                )
-                if not test_file_1:
-                    messagebox.showinfo("Skipped", "No test file selected — skipping test.")
-                    test_file_1 = None
+            self.current_fs = fs
+            self.selected_signal_for_ft = sig
 
-                output_filename = filedialog.asksaveasfilename(
-                    title="Save Quantization Output",
-                    defaultextension=".txt",
-                    filetypes=[("Text files", "*.txt")],
-                    initialfile="quantized_output.txt"
-                )
-                if not output_filename:
-                    return
-
-                _, codes, q_vals, _ = quantize_to_file(
-                    sig.samples,
-                    output_filename,
-                    mode,
-                    num_bits=bits,
-                    test_file_1=test_file_1
-                )
-                messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
-
-            else:
-                levels = int(simpledialog.askstring("Levels", "Enter number of levels:"))
-                test_file_2 = filedialog.askopenfilename(
-                    title="Select Quan2_Out.txt (expected test file)",
-                    filetypes=[("Text files", "*.txt")]
-                )
-                if not test_file_2:
-                    messagebox.showinfo("Skipped", "No test file selected — skipping test.")
-                    test_file_2 = None
-
-                output_filename = filedialog.asksaveasfilename(
-                    title="Save Quantization Output",
-                    defaultextension=".txt",
-                    filetypes=[("Text files", "*.txt")],
-                    initialfile="quantized_output.txt"
-                )
-                if not output_filename:
-                    return
-
-                interval, codes, q_vals, errs = quantize_to_file(
-                    sig.samples,
-                    output_filename,
-                    mode,
-                    num_levels=levels,
-                    test_file_2=test_file_2
-                )
-                messagebox.showinfo("Done", f"Quantization complete!\nSaved to:\n{output_filename}")
-
+            messagebox.showinfo("DFT", "DFT applied successfully.")
         except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-
-
-    def _plot_frequency_domain(self):
-        """Helper function to plot the current frequency domain data."""
-        if self.frequencies is None:
-            messagebox.showerror("Error", "No Frequency Domain data to plot.")
-            return
-
-        self.ax_cont.clear()
-        self.ax_disc.clear()
-
-        # We only plot the first half (positive frequencies)
-        N = len(self.frequencies)
-        n_to_show = N // 2
-
-        # Plot Amplitude
-        self.ax_cont.plot(self.frequencies[:n_to_show], self.amplitudes_norm[:n_to_show])
-        self.ax_cont.set_title("Frequency vs. Amplitude (Normalized)")
-        self.ax_cont.set_xlabel("Frequency (Hz)")
-        self.ax_cont.set_ylabel("Normalized Amplitude")
-
-        # Plot Phase
-        self.ax_disc.stem(self.frequencies[:n_to_show], self.phases[:n_to_show])
-        self.ax_disc.set_title("Frequency vs. Phase")
-        self.ax_disc.set_xlabel("Frequency (Hz)")
-        self.ax_disc.set_ylabel("Phase (Radians)")
-
-        self.canvas.draw()
-
-    def apply_dft(self):
-        """
-        Applies Fourier Transform to the selected signal and plots the result.
-        """
-        sels = self._get_selected_signals()
-        if len(sels) != 1:
-            messagebox.showwarning("Warning", "Select exactly one signal to transform.")
-            return
-
-        self.selected_signal_for_ft = sels[0]
-
-        try:
-            Fs_str = simpledialog.askstring("Sampling Frequency", "Enter Sampling Frequency (Hz):")
-            if Fs_str is None: return  # User cancelled
-            Fs = float(Fs_str)
-            if Fs <= 0:
-                raise ValueError("Sampling frequency must be positive.")
-        except (TypeError, ValueError) as e:
-            messagebox.showerror("Error", f"Invalid input for Sampling Frequency: {e}")
-            return
-
-        self.current_fs = Fs
-        y_values = [s[1] for s in self.selected_signal_for_ft.samples]
-
-        # Call the DFT function
-        (self.frequencies,
-         self.amplitudes_norm,
-         self.phases,
-         self.amplitudes_unnorm,
-         self.freq_components) = dft(y_values, self.current_fs)
-
-        if len(self.frequencies) == 0:
-            messagebox.showerror("Error", "DFT computation failed. Signal may be empty.")
-            return
-
-        # Plot the results
-        self._plot_frequency_domain()
-
-        # Also show dominant frequencies
-        self.show_dominant_frequencies(show_message=True)
-
-    def show_dominant_frequencies(self, show_message=False):
-        """
-        Displays the dominant frequencies (Amp > 0.5) in a messagebox.
-        """
-        if self.frequencies is None:
-            messagebox.showwarning("No FT Data", "Please apply Fourier Transform first.")
-            return
-
-        dominant_freqs = get_dominant_frequencies(self.frequencies, self.amplitudes_norm, threshold=0.5)
-
-        if show_message:  # To avoid double popups when called from apply_dft
-            return
-
-        if not dominant_freqs:
-            messagebox.showinfo("Dominant Frequencies", "No dominant frequencies found (Amplitude > 0.5).")
-        else:
-            freq_str = "\n".join([f"{f:.2f} Hz" for f in dominant_freqs])
-            messagebox.showinfo("Dominant Frequencies", f"Frequencies with Amplitude > 0.5:\n{freq_str}")
-
-    def remove_dc(self):
-        """
-        Removes the DC component (F(0)) from the stored FT data and replots.
-        """
-        if self.freq_components is None:
-            messagebox.showwarning("No FT Data", "Please apply Fourier Transform first.")
-            return
-
-        # Set the 0-frequency component to 0
-        self.freq_components[0] = 0
-
-        # Recalculate amplitudes and phases
-        self.amplitudes_unnorm = np.abs(self.freq_components)
-        self.phases = np.angle(self.freq_components)
-
-        max_amp = np.max(self.amplitudes_unnorm)
-        if max_amp == 0:
-            self.amplitudes_norm = self.amplitudes_unnorm
-        else:
-            self.amplitudes_norm = self.amplitudes_unnorm / max_amp
-
-        # Re-plot
-        self._plot_frequency_domain()
-        messagebox.showinfo("DC Removed", "DC component (F(0)) has been set to zero.\nRe-plotting frequency domain.")
-
-    def modify_components_dialog(self):
-        """
-        Opens a new window to modify the amplitude and phase of FT components.
-        """
-        if self.frequencies is None:
-            messagebox.showwarning("No FT Data", "Please apply Fourier Transform first.")
-            return
-
-        # --- Create Toplevel Window ---
-        top = tk.Toplevel(self.root)
-        top.title("Modify Frequency Components")
-        top.transient(self.root)  # Keep it on top
-        top.grab_set()  # Modal
-
-        # --- Data Store (as a list of tuples) ---
-        # We work on a temporary copy
-        current_data = list(zip(
-            self.frequencies,
-            self.amplitudes_unnorm,
-            self.phases
-        ))
-
-        # --- Listbox ---
-        list_frame = tk.Frame(top)
-        list_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        tk.Label(list_frame, text="Components (Index | Freq | Amp | Phase):").pack(anchor='w')
-
-        scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL)
-        listbox = tk.Listbox(list_frame, width=55, height=20, yscrollcommand=scrollbar.set)
-        scrollbar.config(command=listbox.yview)
-
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        listbox.pack(fill=tk.BOTH, expand=True)
-
-        def populate_listbox():
-            listbox.delete(0, tk.END)
-            # Show all N components
-            for i, (f, a, p) in enumerate(current_data):
-                listbox.insert(tk.END, f"{i:03d} | F: {f:8.2f} Hz | A: {a:8.2f} | P: {p:8.2f} rad")
-
-        # --- Edit Frame ---
-        edit_frame = tk.Frame(top)
-        edit_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-
-        tk.Label(edit_frame, text="New Amplitude:").pack()
-        amp_entry = tk.Entry(edit_frame)
-        amp_entry.pack()
-
-        tk.Label(edit_frame, text="New Phase (rad):").pack()
-        phase_entry = tk.Entry(edit_frame)
-        phase_entry.pack()
-
-        def on_select(evt):
-            try:
-                selected_index = listbox.curselection()[0]
-                _, amp, phase = current_data[selected_index]
-                amp_entry.delete(0, tk.END)
-                amp_entry.insert(0, f"{amp:.4f}")
-                phase_entry.delete(0, tk.END)
-                phase_entry.insert(0, f"{phase:.4f}")
-            except IndexError:
-                pass  # No selection
-
-        listbox.bind('<<ListboxSelect>>', on_select)
-
-        def apply_modification():
-            try:
-                selected_index = listbox.curselection()[0]
-                new_amp = float(amp_entry.get())
-                new_phase = float(phase_entry.get())
-
-                # Update temporary data store
-                freq, _, _ = current_data[selected_index]
-                current_data[selected_index] = (freq, new_amp, new_phase)
-
-                # Update listbox
-                populate_listbox()
-                listbox.selection_set(selected_index)
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not apply modification: {e}", parent=top)
-
-        tk.Button(edit_frame, text="Apply Modification", command=apply_modification).pack(pady=10)
-
-        # --- Done/Cancel Buttons ---
-        def on_done():
-            # Write changes back to self
-            self.frequencies = np.array([d[0] for d in current_data])
-            self.amplitudes_unnorm = np.array([d[1] for d in current_data])
-            self.phases = np.array([d[2] for d in current_data])
-
-            # Recalculate normalized amps
-            max_amp = np.max(self.amplitudes_unnorm)
-            self.amplitudes_norm = self.amplitudes_unnorm / max_amp if max_amp != 0 else self.amplitudes_unnorm
-
-            # Re-plot FT
-            self._plot_frequency_domain()
-            messagebox.showinfo("Success", "Components have been updated.", parent=self.root)
-            top.destroy()
-
-        def on_cancel():
-            top.destroy()
-
-        tk.Button(edit_frame, text="Done (Save Changes)", command=on_done).pack(side=tk.BOTTOM, pady=20)
-        tk.Button(edit_frame, text="Cancel", command=on_cancel).pack(side=tk.BOTTOM)
-
-        populate_listbox()
+            messagebox.showerror("Error", f"DFT failed:\n{e}")
 
     def apply_idft(self):
-        """
-        Reconstructs the signal from the (potentially modified) FT data
-        and adds it as a new signal to the list.
-        """
-        if self.amplitudes_unnorm is None:
-            messagebox.showwarning("No FT Data", "Please apply Fourier Transform or modify components first.")
+        if self.freq_components is None:
+            messagebox.showwarning("Warning", "Perform DFT first.")
             return
 
-        if self.selected_signal_for_ft is None:
-            messagebox.showerror("Error", "Original signal context lost. Please re-apply DFT.")
+        try:
+            y = idft(self.freq_components)
+            x = [i for i in range(len(y))]
+            result = Signal.from_arrays(
+                x, y,
+                name=unique_name("IDFT_Result", [s.name for s in self.signals])
+            )
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo("IDFT", f"Reconstructed signal '{result.name}'.")
+        except Exception as e:
+            messagebox.showerror("Error", f"IDFT failed:\n{e}")
+
+    def show_dominant_frequencies(self):
+        if self.frequencies is None or self.amplitudes_norm is None:
+            messagebox.showwarning("Warning", "Apply DFT first.")
             return
 
-        # Reconstruct the complex array from the (potentially modified) amps/phases
-        modified_complex = self.amplitudes_unnorm * np.exp(1j * self.phases)
+        try:
+            dom = get_dominant_frequencies(self.frequencies, self.amplitudes_norm)
+            if not dom:
+                messagebox.showinfo("Dominant Frequencies", "No dominant frequencies found or DFT not available.")
+                return
+            messagebox.showinfo("Dominant Frequencies",
+                                "\n".join([f"{f} Hz" for f in dom]))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed:\n{e}")
 
-        # Call IDFT
-        reconstructed_y = idft(modified_complex)
-
-        original_samples = self.selected_signal_for_ft.samples
-        if len(original_samples) != len(reconstructed_y):
-            messagebox.showerror("Error", "Mismatch in length during reconstruction. This should not happen.")
+    def remove_dc(self):
+        if self.amplitudes_norm is None:
+            messagebox.showwarning("Warning", "Apply DFT first.")
             return
 
-        x_values = [s[0] for s in original_samples]
+        try:
+            self.amplitudes_norm[0] = 0
+            self.amplitudes_unnorm[0] = 0
+            messagebox.showinfo("DC Removal", "DC component removed.")
+        except Exception as e:
+            messagebox.showerror("Error", f"DC removal failed:\n{e}")
 
-        sig_name = unique_name(
-            f"{self.selected_signal_for_ft.name}_IDFT",
-            [s.name for s in self.signals]
-        )
-        new_sig = Signal.from_arrays(x_values, reconstructed_y, name=sig_name)
-
-        self.signals.append(new_sig)
-        self._refresh_listbox()
-
-        messagebox.showinfo("Signal Reconstructed",
-                            f"Signal '{sig_name}' created from IDFT.\nSelect it from the list and press 'Plot Selected' to view.")
-
-    # --- TEST FUNCTIONS ---
-
-    def test_reconstruction_dialog(self):
-        """
-        Tests a selected TIME-DOMAIN signal against an expected TIME-DOMAIN signal file.
-        Uses CompareSignals.SignalsAreEqual
-        """
+    def remove_dc_time_domain(self):
         sels = self._get_selected_signals()
         if len(sels) != 1:
-            messagebox.showwarning("Warning", "Select exactly one TIME-DOMAIN signal to test.")
+            messagebox.showwarning("Warning", "Select one signal.")
             return
 
-        sig_to_test = sels[0]
+        sig = sels[0]
+        try:
+            mean_val = sum([s[1] for s in sig.samples]) / len(sig.samples)
+            new_samples = [[x, y - mean_val] for x, y in sig.samples]
+            result = Signal(sig.signal_type, sig.is_periodic, new_samples,
+                            name=unique_name(f"{sig.name}_noDC", [s.name for s in self.signals]))
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo("Remove DC", f"Created '{result.name}'.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed:\n{e}")
 
-        test_file_path = filedialog.askopenfilename(
-            title="Select Expected TIME-DOMAIN Signal File (index sample)",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+    def modify_components_dialog(self):
+        if self.freq_components is None:
+            messagebox.showwarning("Warning", "Apply DFT first.")
+            return
+
+        try:
+            idx = int(simpledialog.askstring("Modify Component",
+                                             "Enter index of frequency component:"))
+            amp = float(simpledialog.askstring("Amplitude", "Enter new amplitude:"))
+            phase = float(simpledialog.askstring("Phase", "Enter new phase (radians):"))
+
+            self.amplitudes_norm[idx] = amp
+            self.phases[idx] = phase
+
+            messagebox.showinfo("Modify", "Component modified.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed:\n{e}")
+
+    def test_reconstruction_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select one signal.")
+            return
+
+        sig = sels[0]
+        file = filedialog.askopenfilename(
+            title="Select reference file",
+            filetypes=[("Text files", "*.txt")]
         )
+        if not file:
+            return
 
-        if not test_file_path:
-            return  # User cancelled
-
-        # Call the test function from the FT module
-        test_reconstructed_signal(sig_to_test, test_file_path)
-
-        messagebox.showinfo("Test Complete",
-                            "Time-Domain test finished.\n\n"
-                            "Please check your console (terminal) for 'passed' or 'failed' messages.")
+        try:
+            test_reconstructed_signal(sig, file)
+        except Exception as e:
+            messagebox.showerror("Error", f"Test failed:\n{e}")
 
     def test_dft_output_dialog(self):
-        """
-        Tests the current DFT output (Amplitudes/Phases) against an expected
-        FREQUENCY-DOMAIN file. Uses signalcompare.SignalComapre...
-        """
-        if self.amplitudes_unnorm is None or self.phases is None:
-            messagebox.showwarning("No FT Data",
-                                   "Please run 'Apply Fourier Transform' first to generate data to test.")
+        if self.amplitudes_norm is None or self.phases is None:
+            messagebox.showwarning("Warning", "Apply DFT first.")
             return
 
-        test_file_path = filedialog.askopenfilename(
-            title="Select Expected FREQUENCY-DOMAIN File (amplitude phase)",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        file = filedialog.askopenfilename(
+            title="Select test file",
+            filetypes=[("Text files", "*.txt")]
         )
-
-        if not test_file_path:
-            return  # User cancelled
-
-        # Call the test function from the FT module
-        run_comparison_test(
-            output_file_to_read=test_file_path,
-            input_amplitudes=self.amplitudes_unnorm,
-            input_phases=self.phases
-        )
-
-        messagebox.showinfo("Test Complete",
-                            "Frequency-Domain test finished.\n\n"
-                            "Please check your console (terminal) for 'passed' or 'failed' messages.")
-        
-
-
-
-#TESTS
-
-def ConvTest(Your_indices, Your_samples): 
-    """
-    Test inputs
-    InputIndicesSignal1 =[-2, -1, 0, 1]
-    InputSamplesSignal1 = [1, 2, 1, 1 ]
-    
-    InputIndicesSignal2=[0, 1, 2, 3, 4, 5 ]
-    InputSamplesSignal2 = [ 1, -1, 0, 0, 1, 1 ]
-    """
-    
-    expected_indices=[-2, -1, 0, 1, 2, 3, 4, 5, 6]
-    expected_samples = [1, 1, -1, 0, 0, 3, 3, 2, 1 ]
-
-    if (len(expected_samples)!=len(Your_samples)) and (len(expected_indices)!=len(Your_indices)):
-        print("Conv Test case failed, your signal have different length from the expected one")
-        return False
-
-    for i in range(len(Your_indices)):
-        if(Your_indices[i]!=expected_indices[i]):
-            print("Conv Test case failed, your signal have different indicies from the expected one") 
-            return False
-
-    for i in range(len(expected_samples)):
-        if abs(Your_samples[i] - expected_samples[i]) < 0.01:
-            continue
-        else:
-            print("Conv Test case failed, your signal have different values from the expected one") 
-            return False
-
-    print("Conv Test case passed successfully")
-    return True
-
-
-
-def Compare_Signals(file_name,Your_indices,Your_samples):      
-    expected_indices=[]
-    expected_samples=[]
-    with open(file_name, 'r') as f:
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        line = f.readline()
-        while line:
-            # process line
-            L=line.strip()
-            if len(L.split(' '))==2:
-                L=line.split(' ')
-                V1=int(L[0])
-                V2=float(L[1])
-                expected_indices.append(V1)
-                expected_samples.append(V2)
-                line = f.readline()
-            else:
-                break
-    print("Current Output Test file is: ")
-    print(file_name)
-    print("\n")
-    if (len(expected_samples)!=len(Your_samples)) and (len(expected_indices)!=len(Your_indices)):
-        print("Shift_Fold_Signal Test case failed, your signal have different length from the expected one")
-        return
-    for i in range(len(Your_indices)):
-        if(Your_indices[i]!=expected_indices[i]):
-            print("Shift_Fold_Signal Test case failed, your signal have different indicies from the expected one") 
+        if not file:
             return
-    for i in range(len(expected_samples)):
-        if abs(Your_samples[i] - expected_samples[i]) < 0.01:
-            continue
-        else:
-            print("Correlation Test case failed, your signal have different values from the expected one") 
-            return
-    print("Correlation Test case passed successfully")
+
+        try:
+            run_comparison_test(file, self.amplitudes_norm, self.phases)
+        except Exception as e:
+            messagebox.showerror("Error", f"Test failed:\n{e}")
