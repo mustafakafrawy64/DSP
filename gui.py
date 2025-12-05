@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -23,6 +22,17 @@ except Exception:
         else:
             y = A * np.cos(2 * np.pi * F * t + phase)
         return list(t), list(y)
+
+
+try:
+    from fir_filter import design_fir, save_coefficients, apply_filter_to_signal
+except Exception:
+    def design_fir(*a, **k):
+        raise ImportError('fir_filter.py missing')
+    def save_coefficients(*a, **k):
+        raise ImportError('fir_filter.py missing')
+    def apply_filter_to_signal(*a, **k):
+        raise ImportError('fir_filter.py missing')
 
 try:
     from utils import unique_name
@@ -204,6 +214,9 @@ class SignalApp:
         ops_menu.add_command(label="Delay/Advance Signal by k", command=self.shift_dialog)
         ops_menu.add_command(label="Fold (Time Reverse) Signal", command=self.fold_dialog)
         ops_menu.add_command(label="Fold then Delay/Advance", command=self.fold_shift_dialog)
+        ops_menu.add_separator()
+        ops_menu.add_command(label="Filter (FIR, Window Method)", command=self.filtering_dialog)
+
 
         # Quantization
         ops_menu.add_separator()
@@ -795,3 +808,98 @@ class SignalApp:
             run_comparison_test(file, self.amplitudes_norm, self.phases)
         except Exception as e:
             messagebox.showerror("Error", f"Test failed:\n{e}")
+
+    def filtering_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning('Warning', 'Select exactly one signal to filter.')
+            return
+        sig = sels[0]
+
+        # ask filter type
+        ftype = simpledialog.askstring(
+            "Filter Type",
+            "Enter filter type: 'low', 'high', 'bandpass', or 'bandstop'"
+        )
+        if ftype is None:
+            return
+        ftype = ftype.strip().lower()
+        if ftype not in ('low','high','bandpass','bandstop'):
+            messagebox.showerror('Invalid', 'Filter type must be low/high/bandpass/bandstop')
+            return
+
+        try:
+            Fs_str = simpledialog.askstring('Sampling Frequency', 'Enter sampling frequency (Hz):')
+            if Fs_str is None:
+                return
+            Fs = float(Fs_str)
+            if Fs <= 0:
+                raise ValueError
+        except Exception:
+            messagebox.showerror('Error', 'Invalid sampling frequency')
+            return
+
+        try:
+            if ftype in ('low','high'):
+                fcut_str = simpledialog.askstring('Cutoff Frequency', 'Enter cutoff frequency (Hz):')
+                if fcut_str is None:
+                    return
+                fcut = float(fcut_str)
+                fcuts = fcut
+            else:
+                f1_str = simpledialog.askstring('Lower cutoff f1', 'Enter lower cutoff f1 (Hz):')
+                if f1_str is None:
+                    return
+                f2_str = simpledialog.askstring('Upper cutoff f2', 'Enter upper cutoff f2 (Hz):')
+                if f2_str is None:
+                    return
+                f1 = float(f1_str)
+                f2 = float(f2_str)
+                if f2 <= f1:
+                    messagebox.showerror('Error', 'f2 must be > f1')
+                    return
+                fcuts = (f1, f2)
+
+            A_s_str = simpledialog.askstring('Stopband attenuation', 'Enter desired stopband attenuation (dB), e.g. 60')
+            if A_s_str is None:
+                return
+            A_s = float(A_s_str)
+
+            trans_str = simpledialog.askstring('Transition band', 'Enter transition band width (Hz)')
+            if trans_str is None:
+                return
+            trans = float(trans_str)
+            if trans <= 0:
+                raise ValueError
+        except Exception:
+            messagebox.showerror('Error', 'Invalid numeric input')
+            return
+
+        # design
+        try:
+            h, meta = design_fir(ftype, Fs, fcuts, A_s, trans)
+        except Exception as e:
+            messagebox.showerror('Design error', f'Could not design filter:\\n{e}')
+            return
+
+        # Save coefficients
+        try:
+            savefile = save_coefficients(h)
+        except Exception:
+            savefile = None
+        if savefile:
+            messagebox.showinfo('Saved', f'Filter coefficients saved to:\\n{savefile}')
+
+        # Apply filter (convolution)
+        try:
+            existing = [s.name for s in self.signals]
+            base = f"{sig.name}_filtered"
+            out_name = unique_name(base, existing)
+            result = apply_filter_to_signal(sig, h, name=out_name)
+            result.name = out_name
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo('Done', f'Filter applied. New signal \"{result.name}\" created.')
+        except Exception as e:
+            messagebox.showerror('Filtering error', f'Filtering failed:\\n{e}')
+
