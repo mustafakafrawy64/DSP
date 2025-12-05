@@ -28,6 +28,7 @@ def force_dialogs_above_root(root):
 
 if __name__ == "__main__":
     root = tk.Tk()
+
     app = SignalApp(root)
 
     force_dialogs_above_root(root)

@@ -107,34 +107,74 @@ class Signal:
 # Convolution
 
     def convolve(self, other, name=None):
+        """
+        Fully manual convolution (no numpy).
+        Calls ConvTest(indices, samples) automatically.
+        """
 
-        y1 = np.array([s[1] for s in self.samples])
-        y2 = np.array([s[1] for s in other.samples])
+        from ConvTest import ConvTest # import your test function
 
-        if len(y1) == 0 or len(y2) == 0:
+        # ----------------------------
+        # Extract y-values
+        # ----------------------------
+        y1 = [s[1] for s in self.samples]
+        y2 = [s[1] for s in other.samples]
+
+        N = len(y1)
+        M = len(y2)
+
+        if N == 0 or M == 0:
             return Signal(self.signal_type, self.is_periodic, [], name=name or "Conv")
 
-        # Compute convolution
-        y_conv = np.convolve(y1, y2)
+        # ----------------------------
+        # Manual convolution
+        # y[k] = sum( y1[i] * y2[k-i] )
+        # ----------------------------
+        y_conv = [0.0] * (N + M - 1)
 
-        # Round to 3 decimals
-        y_conv = [round(float(v), 3) for v in y_conv]
+        for k in range(N + M - 1):
+            total = 0.0
+            for i in range(N):
+                j = k - i
+                if 0 <= j < M:
+                    total += y1[i] * y2[j]
+            y_conv[k] = round(total, 3)
 
-        # X spacing taken from first signal
+        # ----------------------------
+        # Build X-axis (indices)
+        # ----------------------------
         x_vals = [s[0] for s in self.samples]
+
+        # spacing
         if len(x_vals) < 2:
-            dx = 1.0
+            dx = 1
         else:
             dx = x_vals[1] - x_vals[0]
 
-        # Build new X-axis
-        x0 = x_vals[0]
-        x_conv = [x0 + i * dx for i in range(len(y_conv))]
+        # starting index
+        start = x_vals[0]
 
-        return Signal(
+        # new indices
+        indices_conv = [start + k * dx for k in range(len(y_conv))]
+
+        # ----------------------------
+        # Build final signal
+        # ----------------------------
+        samples = [[indices_conv[i], y_conv[i]] for i in range(len(y_conv))]
+
+        result = Signal(
             self.signal_type,
             self.is_periodic,
-            samples=[[float(x_conv[i]), float(y_conv[i])] for i in range(len(y_conv))],
-            name=name or f"{self.name}_conv_{other.name}"
+            samples=samples,
+            name=name or f"{self.name}conv{other.name}"
         )
 
+        # ----------------------------
+        # AUTO TEST CALL
+        # ----------------------------
+        try:
+            ConvTest(indices_conv, y_conv)
+        except Exception as e:
+            print("ConvTest error:", e)
+
+        return result
