@@ -216,6 +216,8 @@ class SignalApp:
         ops_menu.add_command(label="Fold then Delay/Advance", command=self.fold_shift_dialog)
         ops_menu.add_separator()
         ops_menu.add_command(label="Filter (FIR, Window Method)", command=self.filtering_dialog)
+        ops_menu.add_command(label="Resampling (M,L)", command=self.resampling_dialog)
+
 
 
         # Quantization
@@ -903,3 +905,27 @@ class SignalApp:
         except Exception as e:
             messagebox.showerror('Filtering error', f'Filtering failed:\\n{e}')
 
+    def resampling_dialog(self):
+        sels = self._get_selected_signals()
+        if len(sels) != 1:
+            messagebox.showwarning("Warning", "Select exactly one signal.")
+            return
+    
+        sig = sels[0]
+    
+        try:
+            M = int(simpledialog.askstring("Resampling", "Enter M (decimation factor):"))
+            L = int(simpledialog.askstring("Resampling", "Enter L (interpolation factor):"))
+        except:
+            messagebox.showerror("Error", "Invalid M or L value.")
+            return
+    
+        try:
+            from resampling import resample_signal
+            new_sig = resample_signal(sig, M, L)
+            new_sig.name = f"{sig.name}_R_{L}-{M}"
+            self.signals.append(new_sig)
+            self._refresh_listbox()
+            messagebox.showinfo("Done", f"Resampling completed. New signal: {new_sig.name}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Resampling failed:\n{e}")
