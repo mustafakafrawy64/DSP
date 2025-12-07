@@ -1,8 +1,7 @@
 import numpy as np
 from tkinter import messagebox
 import os
-from CompareSignals import SignalsAreEqual
-from utils import unique_name
+
 
 class Signal:
     def __init__(self, signal_type, is_periodic, samples, name=None):

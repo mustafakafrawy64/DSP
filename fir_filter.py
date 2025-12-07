@@ -1,11 +1,11 @@
+# fir_filter.py
+# Unified FIR design + test comparison utilities.
 import numpy as np
-from tkinter import filedialog, messagebox
+import re
 
-# Normalized sinc
 def _sinc(x):
     return np.sinc(x)
 
-# Choose window from stopband attenuation
 def choose_window(A_s):
     if A_s <= 50:
         return ("hamming", np.hamming, 3.3)
@@ -14,7 +14,7 @@ def choose_window(A_s):
     else:
         return ("kaiser", np.kaiser, None)
 
-def _kaiser_beta(A_s):
+def kaiser_beta(A_s):
     if A_s > 50:
         return 0.1102 * (A_s - 8.7)
     elif A_s >= 21:
@@ -22,87 +22,144 @@ def _kaiser_beta(A_s):
     else:
         return 0.0
 
-# Compute N (odd)
-def compute_N(A_s, trans_band_norm, window_name, approx_const=None):
-    if trans_band_norm <= 0:
+def compute_N(A_s, tb_norm, win_name, const=None):
+    if tb_norm <= 0:
         raise ValueError("Transition band must be positive")
 
-    if window_name == "kaiser":
-        N = int(np.ceil((A_s - 8.0) / (2.285 * 2 * np.pi * trans_band_norm)))
+    if win_name == "kaiser":
+        N_float = (A_s - 8.0) / (2.285 * 2.0 * np.pi * tb_norm)
+        N = int(np.ceil(N_float))
     else:
-        if approx_const is None:
-            approx_const = 3.3
-        N = int(np.ceil(approx_const / trans_band_norm))
+        if const is None:
+            const = 3.3
+        N = int(np.ceil(const / tb_norm))
 
     if N % 2 == 0:
         N += 1
     if N < 3:
         N = 3
-
     return N
 
-# Ideal lowpass (Type I)
 def ideal_lowpass(fc, N):
     M = (N - 1) // 2
     n = np.arange(N)
-    return 2 * fc * _sinc(2 * fc * (n - M))
+    return 2.0 * fc * _sinc(2.0 * fc * (n - M))
 
-# Main FIR design
 def design_fir(filter_type, Fs, fcuts, A_s, trans_bw):
-    # Normalize
-    if filter_type in ("low", "high"):
-        f_c = float(fcuts) / Fs
-        delta = trans_bw / (2 * Fs)
+    ft = filter_type.lower()
+    win_name, win_func, const = choose_window(A_s)
+    tb_norm = trans_bw / float(Fs)
+    N = compute_N(A_s, tb_norm, win_name, const)
+    delta = trans_bw / (2.0 * Fs)
 
-        if filter_type == "low":
-            f_adj = f_c + delta
+    if ft in ("low", "high"):
+        fc = float(fcuts) / float(Fs)
+        if ft == "low":
+            fc_adj = fc + delta
+            hd = ideal_lowpass(fc_adj, N)
         else:
-            f_adj = f_c - delta
+            fc_adj = fc - delta
+            lp = ideal_lowpass(fc_adj, N)
+            hd = -lp
+            hd[(N - 1)//2] += 1.0
 
-        if not (0 < f_adj < 0.5):
-            raise ValueError("Adjusted cutoff out of range")
-
-    else:  # band filters
-        f1 = fcuts[0] / Fs
-        f2 = fcuts[1] / Fs
-        delta = trans_bw / (2 * Fs)
-
+    elif ft == "bandpass":
+        f1 = float(fcuts[0]) / float(Fs)
+        f2 = float(fcuts[1]) / float(Fs)
         f1_adj = f1 - delta
         f2_adj = f2 + delta
-
-        if not (0 < f1_adj < f2_adj < 0.5):
-            raise ValueError("Adjusted band edges invalid")
-
-    # Window choice
-    win_name, win_func, approx_const = choose_window(A_s)
-    trans_norm = trans_bw / Fs
-    N = compute_N(A_s, trans_norm, win_name, approx_const)
-
-    # Ideal responses
-    if filter_type == "low":
-        hd = ideal_lowpass(f_adj, N)
-
-    elif filter_type == "high":
-        lp = ideal_lowpass(f_adj, N)
-        hd = -lp
-        hd[(N - 1) // 2] += 1
-
-    elif filter_type == "bandpass":
         lp1 = ideal_lowpass(f1_adj, N)
         lp2 = ideal_lowpass(f2_adj, N)
         hd = lp2 - lp1
 
-    elif filter_type == "bandstop":
+    elif ft == "bandstop":
+        f1 = float(fcuts[0]) / float(Fs)
+        f2 = float(fcuts[1]) / float(Fs)
+        f1_adj = f1 - delta
+        f2_adj = f2 + delta
         lp1 = ideal_lowpass(f1_adj, N)
         lp2 = ideal_lowpass(f2_adj, N)
         band = lp2 - lp1
         hd = -band
-        hd[(N - 1) // 2] += 1
+        hd[(N - 1)//2] += 1.0
 
-    # Window
+    else:
+        raise ValueError("Unsupported filter type")
+
     if win_name == "kaiser":
-        beta = _kaiser_beta(A_s)
+        beta = kaiser_beta(A_s)
         w = np.kaiser(N, beta)
     else:
         w = win_func(N)
-        beta = None
+
+    h = hd * w
+    meta = {"N": int(N), "window": win_name, "A_s": A_s, "trans_bw": trans_bw}
+    return h.astype(float), meta
+
+def design_from_specs_file(spec_file):
+    params = {}
+    with open(spec_file, "r") as f:
+        for raw in f:
+            if "=" not in raw:
+                continue
+            k,v = raw.split("=",1)
+            params[k.strip().lower()] = v.strip()
+
+    # Normalize filter type (remove spaces and convert common phrases)
+    raw_ftype = params["filtertype"].lower().replace(" ", "")
+
+    # map synonyms
+    if raw_ftype in ("lowpass", "lpf"):
+        ftype = "low"
+    elif raw_ftype in ("highpass", "hpf"):
+        ftype = "high"
+    elif raw_ftype in ("bandpass", "bpf"):
+        ftype = "bandpass"
+    elif raw_ftype in ("bandstop", "bsf", "notch"):
+        ftype = "bandstop"
+    else:
+        raise ValueError(f"Unsupported filter type: {params['filtertype']}")
+
+    Fs = float(params["fs"])
+    A_s = float(params["stopbandattenuation"])
+    trans = float(params["transitionband"])
+
+    if "low" in ftype or "high" in ftype:
+        fcuts = float(params["fc"])
+    else:
+        fcuts = (float(params["f1"]), float(params["f2"]))
+
+    h, meta = design_fir(ftype, Fs, fcuts, A_s, trans)
+    N = meta["N"]
+    half = N//2
+    indices = list(range(-half, half+1))
+    samples = [float(x) for x in h]
+    return indices, samples
+
+def _parse_expected_file(expected_file):
+    idxs = []
+    vals = []
+    with open(expected_file, "r") as f:
+        for raw in f:
+            parts = raw.split()
+            if len(parts)>=2:
+                try:
+                    idxs.append(int(parts[0]))
+                    vals.append(float(parts[1]))
+                except:
+                    pass
+    return idxs, vals
+
+def compare_with_reference(indices, samples, expected_file, tol=0.01):
+    exp_i, exp_v = _parse_expected_file(expected_file)
+    if len(exp_v)==0:
+        return False, "Expected file empty"
+    if len(exp_v)!=len(samples):
+        return False, "Length mismatch"
+    for a,b in zip(indices,exp_i):
+        if a!=b:
+            return False, f"Index mismatch {a} != {b}"
+    for a,b in zip(samples,exp_v):
+        if abs(a-b)>tol:
+            return False, f"Value mismatch {a} != {b}"
+    return True, "PASS"
