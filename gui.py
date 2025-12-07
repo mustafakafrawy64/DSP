@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import fir_tests
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -26,18 +25,14 @@ except Exception:
 
 
 try:
-    from fir_filter import design_fir
-except Exception as e:
-    raise ImportError("fir_filter.py missing or invalid") from e
-
-
-try:
-    from fir_filter import design_from_specs_file, compare_with_reference
+    from fir_filter import design_fir, save_coefficients, apply_filter_to_signal
 except Exception:
-    def design_from_specs_file(*a, **k):
-        raise ImportError("fir_filter.py missing")
-    def compare_with_reference(*a, **k):
-        raise ImportError("fir_filter.py missing")
+    def design_fir(*a, **k):
+        raise ImportError('fir_filter.py missing')
+    def save_coefficients(*a, **k):
+        raise ImportError('fir_filter.py missing')
+    def apply_filter_to_signal(*a, **k):
+        raise ImportError('fir_filter.py missing')
 
 try:
     from utils import unique_name
@@ -221,7 +216,6 @@ class SignalApp:
         ops_menu.add_command(label="Fold then Delay/Advance", command=self.fold_shift_dialog)
         ops_menu.add_separator()
         ops_menu.add_command(label="Filter (FIR, Window Method)", command=self.filtering_dialog)
-        ops_menu.add_command(label="FIR Test (Specs vs Expected)", command=self.fir_test_dialog)
 
 
         # Quantization
@@ -888,47 +882,24 @@ class SignalApp:
             messagebox.showerror('Design error', f'Could not design filter:\\n{e}')
             return
 
-
-
-
-
-
-
-    def fir_test_dialog(self):
-        """Design FIR from a spec file and compare with expected coefficients file."""
+        # Save coefficients
         try:
-            from fir_filter import design_from_specs_file, compare_with_reference
+            savefile = save_coefficients(h)
         except Exception:
-            messagebox.showerror("Error", "fir_filter.py missing")
-            return
+            savefile = None
+        if savefile:
+            messagebox.showinfo('Saved', f'Filter coefficients saved to:\\n{savefile}')
 
-        spec_file = filedialog.askopenfilename(
-            title="Select filter specification file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        if not spec_file:
-            return
-
-        expected_file = filedialog.askopenfilename(
-            title="Select expected coefficients file",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        if not expected_file:
-            return
-
+        # Apply filter (convolution)
         try:
-            indices, samples = design_from_specs_file(spec_file)
+            existing = [s.name for s in self.signals]
+            base = f"{sig.name}_filtered"
+            out_name = unique_name(base, existing)
+            result = apply_filter_to_signal(sig, h, name=out_name)
+            result.name = out_name
+            self.signals.append(result)
+            self._refresh_listbox()
+            messagebox.showinfo('Done', f'Filter applied. New signal \"{result.name}\" created.')
         except Exception as e:
-            messagebox.showerror("Design error", f"Could not design filter from specs:\n{e}")
-            return
+            messagebox.showerror('Filtering error', f'Filtering failed:\\n{e}')
 
-        try:
-            passed, msg = compare_with_reference(indices, samples, expected_file, tol=0.01)
-        except Exception as e:
-            messagebox.showerror("Comparison error", f"Comparison failed:\n{e}")
-            return
-
-        if passed:
-            messagebox.showinfo("PASS", msg)
-        else:
-            messagebox.showerror("FAIL", msg)
