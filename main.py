@@ -1,4 +1,4 @@
-# main.py
+
 import tkinter as tk
 from tkinter import simpledialog, filedialog, messagebox
 from gui import SignalApp

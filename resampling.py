@@ -1,76 +1,86 @@
+
 import numpy as np
 from signal_model import Signal
-from fir_filter import design_fir, apply_filter_to_signal
+from scipy.signal import firwin, lfilter
 
-# ---------------------------------------------------------
-#   BASIC RESAMPLING OPERATIONS
-# ---------------------------------------------------------
+# ==========================================================
+# FIR LOW-PASS FILTER DESIGN
+# ==========================================================
+def design_lowpass_fir(Fs, Fc, As, TB):
+    N = int(np.ceil(4 / (TB / Fs)))
+    if N % 2 == 0:
+        N += 1
+    h = firwin(N, Fc / (Fs / 2))
+    return h
 
-def upsample(sig, L):
-    samples = sig.samples
-    x = np.array([s[0] for s in samples])
-    y = np.array([s[1] for s in samples])
+# ==========================================================
+# UPSAMPLING
+# ==========================================================
+def upsample_signal(sig, L):
+    if L <= 1:
+        return sig
+    y = np.array([s[1] for s in sig.samples])
+    up_y = np.zeros(len(y) * L)
+    up_y[::L] = y
+    return Signal.from_arrays(list(range(len(up_y))), up_y,
+                              signal_type=sig.signal_type, is_periodic=sig.is_periodic,
+                              name=f"{sig.name}_up{L}")
 
-    new_x = np.arange(0, len(y) * L)
-    new_y = np.zeros(len(y) * L)
+# ==========================================================
+# DOWNSAMPLING
+# ==========================================================
+def downsample_signal(sig, M):
+    if M <= 1:
+        return sig
+    y = np.array([s[1] for s in sig.samples])
+    down_y = y[::M]
+    return Signal.from_arrays(list(range(len(down_y))), down_y,
+                              signal_type=sig.signal_type, is_periodic=sig.is_periodic,
+                              name=f"{sig.name}_down{M}")
 
-    new_y[::L] = y
+# ==========================================================
+# FIR FILTER
+# ==========================================================
+def apply_fir_filter(sig, h):
+    y = np.array([s[1] for s in sig.samples])
+    filtered_y = lfilter(h, 1.0, y)
+    delay = (len(h)-1)//2
+    filtered_y = np.roll(filtered_y, -delay)
+    filtered_y[-delay:] = 0
+    return Signal.from_arrays(list(range(len(filtered_y))), filtered_y,
+                              signal_type=sig.signal_type, is_periodic=sig.is_periodic,
+                              name=f"{sig.name}_filt")
 
-    return Signal(sig.signal_type, sig.is_periodic,
-                  [[float(new_x[i]), float(new_y[i])] for i in range(len(new_x))],
-                  name=f"{sig.name}_up{L}")
-
-
-def downsample(sig, M):
-    samples = sig.samples
-    x = np.array([s[0] for s in samples])
-    y = np.array([s[1] for s in samples])
-
-    new_x = x[::M]
-    new_y = y[::M]
-
-    return Signal(sig.signal_type, sig.is_periodic,
-                  [[float(new_x[i]), float(new_y[i])] for i in range(len(new_x))],
-                  name=f"{sig.name}_down{M}")
-
-
-# ---------------------------------------------------------
-#   RESAMPLING CORE FUNCTION
-# ---------------------------------------------------------
-def resample_signal(sig, M, L):
-    """
-    Handles all four required cases:
-
-    1) M=0, L>0       → Upsample → Lowpass filter
-    2) M>0, L=0       → Lowpass filter → Downsample
-    3) M>0, L>0       → Upsample → Lowpass filter → Downsample
-    4) M=0, L=0       → ERROR
-    """
-
+# ==========================================================
+# RESAMPLING
+# ==========================================================
+def resample_signal(sig, M, L,
+                    InputFS=8000,
+                    InputCutOffFrequency=1500,
+                    InputStopBandAttenuation=50,
+                    InputTransitionBand=500,
+                    start_index=-26):
     if M == 0 and L == 0:
         raise ValueError("Both M and L cannot be zero.")
 
-    # Filter specs (fixed)
-    filter_type = "low"
-    Fs = 8000
-    As = 50
-    Fc = 1500
-    TB = 500
+    h = design_lowpass_fir(InputFS, InputCutOffFrequency, InputStopBandAttenuation, InputTransitionBand)
+    result = sig
 
-    # Step 1 → Upsample (if L > 0)
-    if L > 0:
-        sig_up = upsample(sig, L)
-    else:
-        sig_up = sig
+    if M == 0 and L > 0:
+        result = upsample_signal(sig, L)
+        result = apply_fir_filter(result, h)
+    elif M > 0 and L == 0:
+        result = apply_fir_filter(sig, h)
+        result = downsample_signal(result, M)
+    elif M > 0 and L > 0:
+        result = upsample_signal(sig, L)
+        result = apply_fir_filter(result, h)
+        result = downsample_signal(result, M)
 
-    # Step 2 → Low-pass filter
-    h, meta = design_fir(filter_type, Fs, Fc, As, TB)
-    sig_filtered = apply_filter_to_signal(sig_up, h, name=f"{sig_up.name}_filt")
+    # Ensure integer indexing starting from start_index
+    y_len = len(result.samples)
+    int_x = [start_index + i for i in range(y_len)]
+    y_vals = [s[1] for s in result.samples]
 
-    # Step 3 → Downsample (if M > 0)
-    if M > 0:
-        sig_final = downsample(sig_filtered, M)
-    else:
-        sig_final = sig_filtered
-
-    return sig_final
+    return Signal.from_arrays(int_x, y_vals, signal_type=result.signal_type,
+                              is_periodic=result.is_periodic, name=result.name)
